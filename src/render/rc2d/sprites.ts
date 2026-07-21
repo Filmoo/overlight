@@ -45,8 +45,7 @@ ${NOISE}
 void main() {
   float grain = fbm(vWorld * 9.0) - 0.5;
   float patches = fbm(vWorld * 1.1) - 0.5;
-  float ripple = sin(vWorld.x * 3.1 + fbm(vWorld * 0.9) * 6.0) * 0.5;
-  vec3 c = uColor * (1.0 + grain * 0.04 + patches * 0.03 + ripple * 0.02);
+  vec3 c = uColor * (1.0 + grain * 0.04 + patches * 0.03);
   gl_FragColor = vec4(c, 1.0);
 }
 `;

@@ -4,6 +4,25 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/).
 
+## [0.2.3] - 2026-07-21
+
+### Fixed
+
+- Dark rows in lit sand: removed the sand shader's sine "ripple" term — it
+  drew periodic dark stripes that light made visible.
+- Shadow fins on the lit side of rocks: tangent rays no longer eat light
+  (hit epsilon 1.0 → 0.5 with a conservative march step), and the cascade
+  interval overlap is half a probe spacing instead of a full one (the full
+  overlap made cascades 0 and 1 disagree near occluders).
+- Fan-shaped penumbra steps: per-frame direction jitter within each ray's
+  cone, integrated by the temporal history — 16 hard directions become
+  effectively continuous soft penumbras.
+
+### Changed
+
+- GI buffer 0.6x → 0.7x canvas; march budget 32 → 40 steps; history weight
+  0.85. Still ~4 ms per frame.
+
 ## [0.2.2] - 2026-07-21
 
 ### Fixed

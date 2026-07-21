@@ -64,10 +64,17 @@ uniform bool uHasUpper;
 uniform vec2 uRes;          // GI buffer resolution (px)
 uniform float uCascadeIndex;
 uniform float uBasePx;      // cascade 0 interval length (px)
+uniform float uJitter;      // fresh random per frame, 0..1
 in vec2 vUv;
 out vec4 outColor;
 
 const float TAU = 6.28318530718;
+
+float hash13(vec3 p) {
+  p = fract(p * 0.1031);
+  p += dot(p, p.zyx + 31.32);
+  return fract((p.x + p.y) * p.z);
+}
 
 void main() {
   float n = uCascadeIndex;
@@ -79,22 +86,27 @@ void main() {
   vec2 probePx = probeUV * uRes;
   float dirCount = tiles * tiles;
   float dirIndex = tile.y * tiles + tile.x;
-  float ang = TAU * (dirIndex + 0.5) / dirCount;
+
+  // Per-frame jitter within this ray's angular cone: the temporal history
+  // integrates it into an effectively continuous set of directions,
+  // turning the 16-direction fan into smooth penumbras.
+  float rnd = hash13(vec3(probePx, dirIndex + uJitter * 61.803));
+  float ang = TAU * (dirIndex + 0.25 + 0.5 * rnd) / dirCount;
   vec2 dir = vec2(cos(ang), sin(ang));
 
-  // Geometric ray intervals: cascade n covers [t0, t1), each 4x the previous.
-  // Intervals overlap by one probe spacing to hide the seams between cascades.
-  float t0 = max(0.0, uBasePx * (pow(4.0, n) - 1.0) / 3.0 - tiles);
+  // Geometric ray intervals: cascade n covers [t0, t1), each 4x the previous,
+  // with half a probe spacing of overlap to hide seams between cascades.
+  float t0 = max(0.0, uBasePx * (pow(4.0, n) - 1.0) / 3.0 - tiles * 0.5);
   float t1 = uBasePx * (pow(4.0, n + 1.0) - 1.0) / 3.0;
 
   vec3 radiance = vec3(0.0);
   bool hit = false;
   float t = t0;
-  for (int i = 0; i < 32; i++) {
+  for (int i = 0; i < 40; i++) {
     vec2 p = probePx + dir * t;
     if (p.x < 0.0 || p.y < 0.0 || p.x >= uRes.x || p.y >= uRes.y) break;
     float d = texture(uDist, p / uRes).r;
-    if (d < 1.0) {
+    if (d < 0.5) {
       // Sample the emitter color at the actual surface (via the seed map),
       // not at the march position — the march position often lands on an
       // empty texel next to the surface and reads black.
@@ -103,7 +115,7 @@ void main() {
       hit = true;
       break;
     }
-    t += d;
+    t += max(d, 0.5);
     if (t > t1) break;
   }
 

@@ -26,7 +26,7 @@ import { SpriteWorld } from './sprites';
  * References: Radiance Cascades (Sannikov 2023), jason.today/rc.
  */
 
-const GI_SCALE = 0.6; // GI buffer resolution relative to the canvas
+const GI_SCALE = 0.7; // GI buffer resolution relative to the canvas
 const BASE_INTERVAL_PX = 8;
 
 class Rc2dRenderer implements RendererModule {
@@ -96,11 +96,12 @@ class Rc2dRenderer implements RendererModule {
       uRes: { value: new THREE.Vector2() },
       uCascadeIndex: { value: 0 },
       uBasePx: { value: BASE_INTERVAL_PX },
+      uJitter: { value: 0 },
     });
     this.temporalMat = rawMaterial(TEMPORAL_FS, {
       uCurr: { value: null },
       uPrev: { value: null },
-      uBlend: { value: 0.8 },
+      uBlend: { value: 0.85 },
     });
     this.compositeMat = rawMaterial(COMPOSITE_FS, {
       uAlbedo: { value: null },
@@ -214,6 +215,7 @@ class Rc2dRenderer implements RendererModule {
     this.cascadeMat.uniforms['uDist']!.value = this.distRT.texture;
     this.cascadeMat.uniforms['uSeeds']!.value = src.texture;
     this.cascadeMat.uniforms['uRes']!.value = giRes;
+    this.cascadeMat.uniforms['uJitter']!.value = Math.random();
     let upper: THREE.WebGLRenderTarget | null = null;
     let ping = this.cascadeA;
     let pong = this.cascadeB;
