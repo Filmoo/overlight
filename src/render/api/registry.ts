@@ -8,6 +8,7 @@ import type { RendererModule } from './renderer';
  * Adding a renderer = one folder under src/render/ + one line here.
  */
 const REGISTRY: Record<string, () => Promise<RendererModule>> = {
+  rc2d: async () => (await import('../rc2d/index')).createRc2dRenderer(),
   flat: async () => (await import('../flat/index')).createFlatRenderer(),
 };
 

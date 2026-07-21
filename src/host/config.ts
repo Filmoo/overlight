@@ -19,7 +19,7 @@ export function parseConfig(search: string = window.location.search): AppConfig 
   const debugRaw = q.get('debug');
   return {
     map: q.get('map') ?? 'glowfish-topdown',
-    renderer: q.get('renderer') ?? 'flat',
+    renderer: q.get('renderer') ?? 'rc2d',
     fps: Number.isFinite(fpsRaw) ? clamp(fpsRaw, 15, 120) : 60,
     debug: debugRaw === null ? null : debugRaw === '1' || debugRaw === 'true',
   };
