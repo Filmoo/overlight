@@ -118,8 +118,22 @@ class Rc2dRenderer implements RendererModule {
 
   private allocTargets(w: number, h: number): void {
     this.disposeTargets();
-    this.giW = Math.max(4, Math.floor(w * GI_SCALE));
-    this.giH = Math.max(4, Math.floor(h * GI_SCALE));
+    const rawW = Math.max(64, Math.floor(w * GI_SCALE));
+    const rawH = Math.max(64, Math.floor(h * GI_SCALE));
+
+    // Enough cascades for the top interval to span the GI buffer diagonal.
+    const diag = Math.hypot(rawW, rawH);
+    this.cascadeCount = Math.max(
+      3,
+      Math.ceil(Math.log((3 * diag) / BASE_INTERVAL_PX + 1) / Math.log(4)),
+    );
+
+    // The buffer MUST be a multiple of the top cascade's tile count —
+    // fractional tile sizes put probes at inconsistent positions across
+    // cascades and render as moiré "curtains" in the light field.
+    const mult = 2 ** (this.cascadeCount + 1);
+    this.giW = Math.max(mult, Math.floor(rawW / mult) * mult);
+    this.giH = Math.max(mult, Math.floor(rawH / mult) * mult);
 
     // MSAA on every target that rasterizes geometry: silhouettes (rocks,
     // fish, tank border) come out clean instead of 1px staircases.
@@ -135,13 +149,6 @@ class Rc2dRenderer implements RendererModule {
     this.cascadeB = makeTarget(this.giW, this.giH);
     this.histA = makeTarget(this.giW, this.giH);
     this.histB = makeTarget(this.giW, this.giH);
-
-    // Enough cascades for the top interval to span the GI buffer diagonal.
-    const diag = Math.hypot(this.giW, this.giH);
-    this.cascadeCount = Math.max(
-      3,
-      Math.ceil(Math.log((3 * diag) / BASE_INTERVAL_PX + 1) / Math.log(4)),
-    );
   }
 
   private disposeTargets(): void {

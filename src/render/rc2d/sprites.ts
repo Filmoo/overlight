@@ -20,6 +20,8 @@ void main() {
 }
 `;
 
+// Kept for when texture detail returns after the GI diagnosis.
+// @ts-expect-error TS6133 — intentionally unused in diagnostic mode
 const NOISE = /* glsl */ `
 float hash21(vec2 p) {
   return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
@@ -38,30 +40,20 @@ float fbm(vec2 p) {
 }
 `;
 
+// DIAGNOSTIC MODE: sand and rocks are flat colors so any visible pattern
+// must come from the GI pipeline itself. Texture detail returns once the
+// light field is proven smooth. (fbm helpers in NOISE, currently unused.)
 const SAND_FS = /* glsl */ `
 uniform vec3 uColor;
-varying vec2 vWorld;
-${NOISE}
 void main() {
-  float grain = fbm(vWorld * 9.0) - 0.5;
-  float patches = fbm(vWorld * 1.1) - 0.5;
-  vec3 c = uColor * (1.0 + grain * 0.04 + patches * 0.03);
-  gl_FragColor = vec4(c, 1.0);
+  gl_FragColor = vec4(uColor, 1.0);
 }
 `;
 
 const ROCK_FS = /* glsl */ `
 uniform vec3 uColor;
-uniform float uRadius;
-varying vec2 vLocal;
-varying vec2 vWorld;
-${NOISE}
 void main() {
-  float r = length(vLocal) / uRadius;
-  float rim = 1.0 - 0.35 * smoothstep(0.55, 1.0, r);       // darker edge
-  float top = 1.0 + 0.12 * (vLocal.y / uRadius) * (1.0 - r); // faint top light
-  float n = 1.0 + (fbm(vWorld * 5.0) - 0.5) * 0.22;
-  gl_FragColor = vec4(uColor * rim * top * n, 1.0);
+  gl_FragColor = vec4(uColor, 1.0);
 }
 `;
 
@@ -260,15 +252,14 @@ export class SpriteWorld {
       f.albedoGroup.rotation.z = e.transform.yaw;
       f.emissionMesh.position.set(p.x, p.y, p.z);
       f.rcMesh.position.set(p.x, p.y, p.z);
-      // Tail wiggle + gentle glow pulse: renderer-side life, sim stays clean.
+      // Tail wiggle only — glow pulse disabled while diagnosing GI smoothness
+      // (a pulsing source makes it impossible to tell noise from intent).
       f.tail.rotation.z = Math.sin(time * 6.0 + f.phase) * 0.3;
-      const pulse = 1.0 + 0.05 * Math.sin(time * 1.3 + f.phase);
       const glowMat = f.glowMats[0]!;
-      (glowMat.uniforms['uStrength'] as THREE.IUniform).value =
-        e.material.emissiveStrength * pulse;
+      (glowMat.uniforms['uStrength'] as THREE.IUniform).value = e.material.emissiveStrength;
       (f.rcMat.uniforms['uColor']!.value as THREE.Color)
         .copy(f.tint)
-        .multiplyScalar(SpriteWorld.EMISSION_BOOST * e.material.emissiveStrength * pulse);
+        .multiplyScalar(SpriteWorld.EMISSION_BOOST * e.material.emissiveStrength);
     }
   }
 

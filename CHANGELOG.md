@@ -4,6 +4,26 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/).
 
+## [0.2.4] - 2026-07-21
+
+### Fixed
+
+- The "curtain"/moiré patterns in the light field — two structural bugs:
+  - The GI buffer had arbitrary dimensions, so cascade tiles were
+    fractional pixels wide; probes sat at inconsistent positions across
+    cascades and interfered. The buffer is now sized to a multiple of the
+    top cascade's tile count — every tile is integer-sized.
+  - Cascade merging and composite integration used hardware bilinear
+    filtering, which bleeds across tile borders (different ray directions!)
+    and biases probes near screen edges. Both now use manual bilinear with
+    texelFetch, clamped per-axis inside each tile.
+
+### Changed
+
+- Diagnostic mode (temporary): flat sand/rock colors, no water grade, no
+  glow pulse — so GI smoothness can be judged without cosmetic layers.
+  Texture detail returns after sign-off.
+
 ## [0.2.3] - 2026-07-21
 
 ### Fixed

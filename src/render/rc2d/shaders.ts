@@ -120,17 +120,27 @@ void main() {
   }
 
   if (!hit && uHasUpper) {
-    // Merge the 4 child directions from the upper cascade, bilinearly at
-    // this probe's position (clamped inside each tile to avoid bleeding).
+    // Merge the 4 child directions from the upper cascade with MANUAL
+    // bilinear filtering (texelFetch): hardware filtering near tile borders
+    // bleeds into neighboring tiles — which hold different directions — and
+    // clamping shifts edge probes inward, biasing the field near edges.
     float tilesU = tiles * 2.0;
-    vec2 probesU = uRes / tilesU;
-    vec2 margin = 0.5 / probesU;
-    vec2 pc = clamp(probeUV, margin, 1.0 - margin);
+    vec2 tileSizeU = uRes / tilesU;               // exact integers by construction
+    vec2 gp = probeUV * tileSizeU - 0.5;          // position in upper-probe units
+    vec2 base = floor(gp);
+    vec2 fw = gp - base;
+    vec2 mx = tileSizeU - 1.0;
+    vec2 p00 = clamp(base, vec2(0.0), mx);
+    vec2 p11 = clamp(base + 1.0, vec2(0.0), mx);
     vec3 sum = vec3(0.0);
     for (int k = 0; k < 4; k++) {
       float dU = dirIndex * 4.0 + float(k);
-      vec2 tU = vec2(mod(dU, tilesU), floor(dU / tilesU));
-      sum += texture(uUpper, (tU + pc) / tilesU).rgb;
+      vec2 tO = vec2(mod(dU, tilesU), floor(dU / tilesU)) * tileSizeU;
+      vec3 s00 = texelFetch(uUpper, ivec2(tO + vec2(p00.x, p00.y)), 0).rgb;
+      vec3 s10 = texelFetch(uUpper, ivec2(tO + vec2(p11.x, p00.y)), 0).rgb;
+      vec3 s01 = texelFetch(uUpper, ivec2(tO + vec2(p00.x, p11.y)), 0).rgb;
+      vec3 s11 = texelFetch(uUpper, ivec2(tO + vec2(p11.x, p11.y)), 0).rgb;
+      sum += mix(mix(s00, s10, fw.x), mix(s01, s11, fw.x), fw.y);
     }
     radiance = sum * 0.25;
   }
@@ -169,21 +179,30 @@ void main() {
   vec4 emission = texture(uEmission, vUv);
 
   // Average the 16 cascade-0 directions -> incoming radiance at this pixel.
-  vec2 margin = 2.0 / uGiRes;
-  vec2 pc = clamp(vUv, margin, 1.0 - margin);
+  // Manual bilinear per tile (same reasoning as the cascade merge).
+  vec2 tileSize0 = uGiRes / 4.0;
+  vec2 gp = vUv * tileSize0 - 0.5;
+  vec2 base = floor(gp);
+  vec2 fw = gp - base;
+  vec2 mx = tileSize0 - 1.0;
+  vec2 p00 = clamp(base, vec2(0.0), mx);
+  vec2 p11 = clamp(base + 1.0, vec2(0.0), mx);
   vec3 irr = vec3(0.0);
   for (int k = 0; k < 16; k++) {
-    vec2 tile = vec2(float(k % 4), float(k / 4));
-    irr += texture(uCascade0, (tile + pc) * 0.25).rgb;
+    vec2 tO = vec2(float(k % 4), float(k / 4)) * tileSize0;
+    vec3 s00 = texelFetch(uCascade0, ivec2(tO + vec2(p00.x, p00.y)), 0).rgb;
+    vec3 s10 = texelFetch(uCascade0, ivec2(tO + vec2(p11.x, p00.y)), 0).rgb;
+    vec3 s01 = texelFetch(uCascade0, ivec2(tO + vec2(p00.x, p11.y)), 0).rgb;
+    vec3 s11 = texelFetch(uCascade0, ivec2(tO + vec2(p11.x, p11.y)), 0).rgb;
+    irr += mix(mix(s00, s10, fw.x), mix(s01, s11, fw.x), fw.y);
   }
   irr *= 1.0 / 16.0;
 
   vec3 lit = albedo.rgb * (uAmbient + irr * uIntensity) + emission.rgb;
 
-  // Subtle cool water grade, tonemap, gentle contrast, gamma.
-  lit *= vec3(0.92, 0.98, 1.06);
+  // DIAGNOSTIC MODE: plain tonemap + gamma only — no grade, no contrast
+  // curve — so the light field is seen as-is.
   lit = lit / (lit + 1.0);
-  lit = mix(lit, lit * lit * (3.0 - 2.0 * lit), 0.35);
   lit = pow(lit, vec3(1.0 / 2.2));
 
   // Dither before 8-bit quantization: large smooth dark gradients would
