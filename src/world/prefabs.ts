@@ -24,7 +24,7 @@ export const PREFABS: Record<string, PrefabDef> = {
   'rock-round': {
     shape: { kind: 'sphere', radius: 0.45 },
     material: {
-      albedo: [0.42, 0.41, 0.4],
+      albedo: [0.52, 0.51, 0.5],
       emissive: [0, 0, 0],
       emissiveStrength: 0,
     },
@@ -33,7 +33,7 @@ export const PREFABS: Record<string, PrefabDef> = {
   'sand-floor': {
     shape: { kind: 'box', size: { x: 12, y: 8, z: 0.2 } },
     material: {
-      albedo: [0.76, 0.68, 0.52],
+      albedo: [0.62, 0.61, 0.55],
       emissive: [0, 0, 0],
       emissiveStrength: 0,
     },
