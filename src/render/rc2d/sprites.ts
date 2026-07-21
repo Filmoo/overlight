@@ -59,14 +59,12 @@ void main() {
 
 const CORE_FS = /* glsl */ `
 uniform vec3 uColor;
-uniform float uRadius;
-varying vec2 vLocal;
 void main() {
-  // Radial falloff inside the GI light disc: rays hitting the rim pick up a
-  // dimmer color, so light pools fade smoothly instead of ringing.
-  float r = length(vLocal) / uRadius;
-  float fall = mix(1.0, 0.25, smoothstep(0.3, 1.0, r));
-  gl_FragColor = vec4(uColor * fall, 1.0);
+  // SOLID emitter, like every reference implementation. Rays always stop at
+  // the disc edge, so any radial falloff here means distant rays only ever
+  // sample the dim rim — which collapses the light field's 1/r falloff.
+  // Smooth pools must come from the solver, never from softening the source.
+  gl_FragColor = vec4(uColor, 1.0);
 }
 `;
 
@@ -229,7 +227,6 @@ export class SpriteWorld {
             .clone()
             .multiplyScalar(this.boost * e.material.emissiveStrength),
         },
-        uRadius: { value: coreR },
       },
     });
     const rcMesh = new THREE.Mesh(new THREE.CircleGeometry(coreR, 32), rcMat);

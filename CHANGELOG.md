@@ -4,6 +4,18 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/).
 
+## [0.2.7] - 2026-07-21
+
+### Fixed
+
+- THE gradient bug: GI light cores had a radial falloff (added in 0.2.2 to
+  hide rings), but rays always stop at a source's edge — so every distant ray
+  sampled the near-zero rim and the light field's 1/r falloff collapsed into
+  a tight halo + darkness. Emitters are now solid, like every reference
+  implementation; pools finally spread across the scene and blend.
+- Added a debug view param (0 final · 1 raw GI field · 2 no glow) — judging
+  the solver without the cosmetic layers is what exposed the bug.
+
 ## [0.2.6] - 2026-07-21
 
 ### Fixed

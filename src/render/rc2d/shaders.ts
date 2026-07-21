@@ -181,6 +181,7 @@ uniform vec2 uGiRes;
 uniform vec3 uAmbient;
 uniform float uIntensity;
 uniform int uTiles0;          // direction tiles per axis at cascade 0
+uniform float uDebugView;     // 0 = final, 1 = raw GI field, 2 = GI x albedo (no glow)
 in vec2 vUv;
 out vec4 outColor;
 
@@ -210,7 +211,14 @@ void main() {
   }
   irr *= 1.0 / float(dirs);
 
-  vec3 lit = albedo.rgb * (uAmbient + irr * uIntensity) + emission.rgb;
+  if (uDebugView > 0.5 && uDebugView < 1.5) {
+    // Raw GI irradiance, gamma only — judge the solver with no makeup.
+    outColor = vec4(pow(clamp(irr, 0.0, 1.0), vec3(1.0 / 2.2)), 1.0);
+    return;
+  }
+
+  vec3 lit = albedo.rgb * (uAmbient + irr * uIntensity);
+  if (uDebugView < 1.5) lit += emission.rgb;
 
   // Hue-preserving tonemap: Reinhard on LUMINANCE, not per channel.
   // Per-channel compression saturates the dominant channel first, which

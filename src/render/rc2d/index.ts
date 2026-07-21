@@ -39,6 +39,7 @@ const PARAM_DEFS: readonly ParamDef[] = [
   { key: 'intensity', label: 'light intensity', min: 0.2, max: 3, step: 0.05, value: 1.3 },
   { key: 'ambient', label: 'ambient level', min: 0, max: 0.4, step: 0.005, value: 0.115 },
   { key: 'boost', label: 'emitter boost', min: 1, max: 10, step: 0.1, value: 5.5 },
+  { key: 'debugView', label: 'view (0 final · 1 GI · 2 no glow)', min: 0, max: 2, step: 1, value: 0 },
 ];
 
 class Rc2dRenderer implements RendererModule {
@@ -132,6 +133,7 @@ class Rc2dRenderer implements RendererModule {
       uAmbient: { value: AMBIENT_HUE.clone().multiplyScalar(this.p['ambient']!) },
       uIntensity: { value: this.p['intensity'] },
       uTiles0: { value: 2 ** this.p['tileExp']! },
+      uDebugView: { value: this.p['debugView'] },
     });
 
     this.allocTargets(ctx.width, ctx.height);
@@ -224,6 +226,9 @@ class Rc2dRenderer implements RendererModule {
         break;
       case 'boost':
         this.sprites.setBoost(value);
+        break;
+      case 'debugView':
+        this.compositeMat.uniforms['uDebugView']!.value = value;
         break;
     }
   }
