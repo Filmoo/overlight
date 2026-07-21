@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>overlight · control</title>
+  </head>
+  <body>
+    <main class="wrap">
+      <aside class="panel">
+        <header>
+          <h1 class="wordmark">overlight<span class="dot"></span></h1>
+          <p class="tagline">render engine for OBS overlays</p>
+        </header>
+
+        <div class="field">
+          <label for="map">Map</label>
+          <select id="map"></select>
+        </div>
+
+        <div class="field">
+          <label for="renderer">Renderer</label>
+          <select id="renderer"></select>
+        </div>
+
+        <div class="field">
+          <label for="fps">Frame rate</label>
+          <select id="fps">
+            <option value="30">30 fps</option>
+            <option value="60" selected>60 fps</option>
+          </select>
+        </div>
+
+        <div class="field check">
+          <label class="check-row">
+            <input type="checkbox" id="backdrop" checked />
+            <span>Preview backdrop (checkerboard)</span>
+          </label>
+        </div>
+
+        <div class="field grow">
+          <label for="url">Source URL</label>
+          <div class="url-row">
+            <input type="text" id="url" readonly spellcheck="false" />
+            <button id="copy" type="button">Copy</button>
+          </div>
+          <p class="hint">
+            In OBS: Sources → <em>Browser</em> → paste this URL. Match width and height to your
+            canvas. The overlay is transparent inside OBS.
+          </p>
+        </div>
+      </aside>
+
+      <section class="preview">
+        <iframe id="preview" title="overlay preview"></iframe>
+      </section>
+    </main>
+    <script type="module" src="/src/control/control.ts"></script>
+  </body>
+</html>
