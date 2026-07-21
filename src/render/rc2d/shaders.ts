@@ -65,6 +65,8 @@ uniform vec2 uRes;          // GI buffer resolution (px)
 uniform float uCascadeIndex;
 uniform float uBasePx;      // cascade 0 interval length (px)
 uniform float uJitter;      // fresh random per frame, 0..1
+uniform float uTileExp;     // tiles at c0 = 2^uTileExp (1 → 4 dirs, 2 → 16 dirs)
+uniform float uFeather;     // cross-fade width at cascade boundaries, 0..1
 in vec2 vUv;
 out vec4 outColor;
 
@@ -78,7 +80,7 @@ float hash13(vec3 p) {
 
 void main() {
   float n = uCascadeIndex;
-  float tiles = pow(2.0, n + 2.0);        // direction tiles per axis (16 dirs at c0)
+  float tiles = pow(2.0, n + uTileExp);   // direction tiles per axis
   vec2 px = vUv * uRes;
   vec2 tileSize = uRes / tiles;
   vec2 tile = floor(px / tileSize);
@@ -89,7 +91,7 @@ void main() {
 
   // Per-frame jitter within this ray's angular cone: the temporal history
   // integrates it into an effectively continuous set of directions,
-  // turning the 16-direction fan into smooth penumbras.
+  // turning the hard direction fan into smooth penumbras.
   float rnd = hash13(vec3(probePx, dirIndex + uJitter * 61.803));
   float ang = TAU * (dirIndex + 0.25 + 0.5 * rnd) / dirCount;
   vec2 dir = vec2(cos(ang), sin(ang));
@@ -99,8 +101,9 @@ void main() {
   float t0 = max(0.0, uBasePx * (pow(4.0, n) - 1.0) / 3.0 - tiles * 0.5);
   float t1 = uBasePx * (pow(4.0, n + 1.0) - 1.0) / 3.0;
 
-  vec3 radiance = vec3(0.0);
+  vec3 hitCol = vec3(0.0);
   bool hit = false;
+  float tHit = t1;
   float t = t0;
   for (int i = 0; i < 40; i++) {
     vec2 p = probePx + dir * t;
@@ -111,15 +114,23 @@ void main() {
       // not at the march position — the march position often lands on an
       // empty texel next to the surface and reads black.
       vec2 seed = texture(uSeeds, p / uRes).rg;
-      radiance = texture(uScene, seed / uRes).rgb;
+      hitCol = texture(uScene, seed / uRes).rgb;
       hit = true;
+      tHit = t;
       break;
     }
     t += max(d, 0.5);
     if (t > t1) break;
   }
 
-  if (!hit && uHasUpper) {
+  // Cross-fade band at the far end of the interval: a hit near the boundary
+  // blends toward the upper cascade's estimate instead of switching hard.
+  // Kills the visible rings at cascade range boundaries.
+  float band = uFeather * 0.35 * (t1 - t0);
+  float w = hit ? smoothstep(t1 - band, t1, tHit) : 1.0;
+
+  vec3 merged = vec3(0.0);
+  if (uHasUpper && w > 0.001) {
     // Merge the 4 child directions from the upper cascade with MANUAL
     // bilinear filtering (texelFetch): hardware filtering near tile borders
     // bleeds into neighboring tiles — which hold different directions — and
@@ -142,9 +153,10 @@ void main() {
       vec3 s11 = texelFetch(uUpper, ivec2(tO + vec2(p11.x, p11.y)), 0).rgb;
       sum += mix(mix(s00, s10, fw.x), mix(s01, s11, fw.x), fw.y);
     }
-    radiance = sum * 0.25;
+    merged = sum * 0.25;
   }
 
+  vec3 radiance = hit ? mix(hitCol, merged, uHasUpper ? w : 0.0) : merged;
   outColor = vec4(radiance, 1.0);
 }
 `;
@@ -167,10 +179,11 @@ export const COMPOSITE_FS = /* glsl */ `
 precision highp float;
 uniform sampler2D uAlbedo;    // full-res albedo (a: coverage)
 uniform sampler2D uEmission;  // full-res emission glows
-uniform sampler2D uCascade0;  // GI result, 2x2 direction tiles
+uniform sampler2D uCascade0;  // GI result, uTiles0 x uTiles0 direction tiles
 uniform vec2 uGiRes;
 uniform vec3 uAmbient;
 uniform float uIntensity;
+uniform int uTiles0;          // direction tiles per axis at cascade 0
 in vec2 vUv;
 out vec4 outColor;
 
@@ -178,9 +191,9 @@ void main() {
   vec4 albedo = texture(uAlbedo, vUv);
   vec4 emission = texture(uEmission, vUv);
 
-  // Average the 16 cascade-0 directions -> incoming radiance at this pixel.
+  // Average the cascade-0 directions -> incoming radiance at this pixel.
   // Manual bilinear per tile (same reasoning as the cascade merge).
-  vec2 tileSize0 = uGiRes / 4.0;
+  vec2 tileSize0 = uGiRes / float(uTiles0);
   vec2 gp = vUv * tileSize0 - 0.5;
   vec2 base = floor(gp);
   vec2 fw = gp - base;
@@ -188,15 +201,17 @@ void main() {
   vec2 p00 = clamp(base, vec2(0.0), mx);
   vec2 p11 = clamp(base + 1.0, vec2(0.0), mx);
   vec3 irr = vec3(0.0);
+  int dirs = uTiles0 * uTiles0;
   for (int k = 0; k < 16; k++) {
-    vec2 tO = vec2(float(k % 4), float(k / 4)) * tileSize0;
+    if (k >= dirs) break;
+    vec2 tO = vec2(float(k % uTiles0), float(k / uTiles0)) * tileSize0;
     vec3 s00 = texelFetch(uCascade0, ivec2(tO + vec2(p00.x, p00.y)), 0).rgb;
     vec3 s10 = texelFetch(uCascade0, ivec2(tO + vec2(p11.x, p00.y)), 0).rgb;
     vec3 s01 = texelFetch(uCascade0, ivec2(tO + vec2(p00.x, p11.y)), 0).rgb;
     vec3 s11 = texelFetch(uCascade0, ivec2(tO + vec2(p11.x, p11.y)), 0).rgb;
     irr += mix(mix(s00, s10, fw.x), mix(s01, s11, fw.x), fw.y);
   }
-  irr *= 1.0 / 16.0;
+  irr *= 1.0 / float(dirs);
 
   vec3 lit = albedo.rgb * (uAmbient + irr * uIntensity) + emission.rgb;
 

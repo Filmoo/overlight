@@ -1,5 +1,6 @@
 import { parseConfig } from './host/config';
 import { startLoop } from './host/loop';
+import { applySavedParams, mountTunePanel } from './host/tune';
 import { createRenderer } from './render/api/registry';
 import { createWanderSystem } from './sim/wander';
 import { loadMap } from './world/loader';
@@ -26,10 +27,15 @@ async function boot(): Promise<void> {
     renderer.resize(window.innerWidth, window.innerHeight),
   );
 
+  // Persisted tuning applies with or without the panel — OBS uses it too.
+  applySavedParams(renderer);
+  const panel = (cfg.tune ?? !inOBS) ? mountTunePanel(renderer) : null;
+
   const tick = createWanderSystem(world);
   startLoop(cfg.fps, (dt, time) => {
     tick(dt, time);
     renderer.render(world, dt, time);
+    panel?.tick(dt * 1000);
   });
 }
 

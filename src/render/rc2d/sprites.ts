@@ -119,7 +119,12 @@ export class SpriteWorld {
   private fish = new Map<number, FishParts>();
 
   /** Brightness of fish cores as GI light sources. */
-  static readonly EMISSION_BOOST = 5.5;
+  /** Brightness of fish cores as GI light sources. Tunable via setBoost. */
+  private boost = 5.5;
+
+  setBoost(b: number): void {
+    this.boost = b;
+  }
 
   constructor(world: World) {
     for (const e of world.entities) {
@@ -222,7 +227,7 @@ export class SpriteWorld {
         uColor: {
           value: tint
             .clone()
-            .multiplyScalar(SpriteWorld.EMISSION_BOOST * e.material.emissiveStrength),
+            .multiplyScalar(this.boost * e.material.emissiveStrength),
         },
         uRadius: { value: coreR },
       },
@@ -259,7 +264,7 @@ export class SpriteWorld {
       (glowMat.uniforms['uStrength'] as THREE.IUniform).value = e.material.emissiveStrength;
       (f.rcMat.uniforms['uColor']!.value as THREE.Color)
         .copy(f.tint)
-        .multiplyScalar(SpriteWorld.EMISSION_BOOST * e.material.emissiveStrength);
+        .multiplyScalar(this.boost * e.material.emissiveStrength);
     }
   }
 

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { World } from '../../world/components';
 import { fitTopDown } from '../api/extract/planar';
-import type { Capability, RenderContext, RendererModule } from '../api/renderer';
+import type { Capability, ParamDef, RenderContext, RendererModule } from '../api/renderer';
 import { FSQuad, makeTarget, rawMaterial } from './pipeline';
 import {
   CASCADE_FS,
@@ -26,12 +26,28 @@ import { SpriteWorld } from './sprites';
  * References: Radiance Cascades (Sannikov 2023), jason.today/rc.
  */
 
-const GI_SCALE = 0.7; // GI buffer resolution relative to the canvas
-const BASE_INTERVAL_PX = 8;
+/** Ambient hue (deep water blue); the `ambient` param scales it. */
+const AMBIENT_HUE = new THREE.Vector3(0.52, 0.7, 1.0);
+
+const PARAM_DEFS: readonly ParamDef[] = [
+  { key: 'giScale', label: 'GI resolution', min: 0.4, max: 1.0, step: 0.05, value: 0.7 },
+  { key: 'tileExp', label: 'c0 dirs (4^x)', min: 1, max: 2, step: 1, value: 1 },
+  { key: 'basePx', label: 'c0 interval px', min: 4, max: 24, step: 1, value: 8 },
+  { key: 'history', label: 'temporal history', min: 0, max: 0.95, step: 0.01, value: 0.85 },
+  { key: 'feather', label: 'cascade feather', min: 0, max: 1, step: 0.05, value: 0.5 },
+  { key: 'intensity', label: 'light intensity', min: 0.2, max: 3, step: 0.05, value: 1.3 },
+  { key: 'ambient', label: 'ambient level', min: 0, max: 0.4, step: 0.005, value: 0.115 },
+  { key: 'boost', label: 'emitter boost', min: 1, max: 10, step: 0.1, value: 5.5 },
+];
 
 class Rc2dRenderer implements RendererModule {
   readonly id = 'rc2d';
   readonly capabilities: readonly Capability[] = ['gi-2d', 'emissives', 'soft-shadows'];
+  readonly params = PARAM_DEFS;
+
+  private p: Record<string, number> = Object.fromEntries(
+    PARAM_DEFS.map((d) => [d.key, d.value]),
+  );
 
   private three!: THREE.WebGLRenderer;
   private world!: World;
@@ -60,6 +76,8 @@ class Rc2dRenderer implements RendererModule {
   private giW = 1;
   private giH = 1;
   private cascadeCount = 5;
+  private lastW = 1;
+  private lastH = 1;
 
   init(ctx: RenderContext, world: World): void {
     this.world = world;
@@ -95,21 +113,24 @@ class Rc2dRenderer implements RendererModule {
       uHasUpper: { value: false },
       uRes: { value: new THREE.Vector2() },
       uCascadeIndex: { value: 0 },
-      uBasePx: { value: BASE_INTERVAL_PX },
+      uBasePx: { value: this.p['basePx'] },
       uJitter: { value: 0 },
+      uTileExp: { value: this.p['tileExp'] },
+      uFeather: { value: this.p['feather'] },
     });
     this.temporalMat = rawMaterial(TEMPORAL_FS, {
       uCurr: { value: null },
       uPrev: { value: null },
-      uBlend: { value: 0.85 },
+      uBlend: { value: this.p['history'] },
     });
     this.compositeMat = rawMaterial(COMPOSITE_FS, {
       uAlbedo: { value: null },
       uEmission: { value: null },
       uCascade0: { value: null },
       uGiRes: { value: new THREE.Vector2() },
-      uAmbient: { value: new THREE.Vector3(0.06, 0.08, 0.115) },
-      uIntensity: { value: 1.3 },
+      uAmbient: { value: AMBIENT_HUE.clone().multiplyScalar(this.p['ambient']!) },
+      uIntensity: { value: this.p['intensity'] },
+      uTiles0: { value: 2 ** this.p['tileExp']! },
     });
 
     this.allocTargets(ctx.width, ctx.height);
@@ -118,14 +139,14 @@ class Rc2dRenderer implements RendererModule {
 
   private allocTargets(w: number, h: number): void {
     this.disposeTargets();
-    const rawW = Math.max(64, Math.floor(w * GI_SCALE));
-    const rawH = Math.max(64, Math.floor(h * GI_SCALE));
+    const rawW = Math.max(64, Math.floor(w * this.p['giScale']!));
+    const rawH = Math.max(64, Math.floor(h * this.p['giScale']!));
 
     // Enough cascades for the top interval to span the GI buffer diagonal.
     const diag = Math.hypot(rawW, rawH);
     this.cascadeCount = Math.max(
       3,
-      Math.ceil(Math.log((3 * diag) / BASE_INTERVAL_PX + 1) / Math.log(4)),
+      Math.ceil(Math.log((3 * diag) / this.p['basePx']! + 1) / Math.log(4)),
     );
 
     // The buffer MUST be a multiple of the top cascade's tile count —
@@ -168,7 +189,47 @@ class Rc2dRenderer implements RendererModule {
     }
   }
 
+  setParam(key: string, value: number): void {
+    if (!(key in this.p)) return;
+    this.p[key] = value;
+    switch (key) {
+      case 'giScale':
+      case 'basePx':
+        // Buffer geometry depends on these — reallocate.
+        this.cascadeMat.uniforms['uBasePx']!.value = this.p['basePx'];
+        this.allocTargets(this.lastW, this.lastH);
+        break;
+      case 'tileExp':
+        this.cascadeMat.uniforms['uTileExp']!.value = value;
+        this.compositeMat.uniforms['uTiles0']!.value = 2 ** value;
+        break;
+      case 'history':
+        this.temporalMat.uniforms['uBlend']!.value = value;
+        break;
+      case 'feather':
+        this.cascadeMat.uniforms['uFeather']!.value = value;
+        break;
+      case 'intensity':
+        this.compositeMat.uniforms['uIntensity']!.value = value;
+        break;
+      case 'ambient':
+        (this.compositeMat.uniforms['uAmbient']!.value as THREE.Vector3)
+          .copy(AMBIENT_HUE)
+          .multiplyScalar(value);
+        break;
+      case 'boost':
+        this.sprites.setBoost(value);
+        break;
+    }
+  }
+
+  getParam(key: string): number | undefined {
+    return this.p[key];
+  }
+
   resize(width: number, height: number): void {
+    this.lastW = width;
+    this.lastH = height;
     this.three.setSize(width, height, false);
     this.allocTargets(width, height);
     const f = fitTopDown(this.world.bounds, width, height);

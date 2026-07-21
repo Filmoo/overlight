@@ -4,6 +4,26 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/).
 
+## [0.2.5] - 2026-07-21
+
+### Added
+
+- Tuning panel: any renderer exposing `params`/`setParam` gets live sliders
+  (auto-shown outside OBS, `?tune=1` to force). Values persist per renderer
+  in localStorage — the overlay applies them with or without the panel — plus
+  an fps/ms readout and reset. rc2d exposes: GI resolution, cascade-0
+  direction count, base interval, temporal history, cascade feather, light
+  intensity, ambient level, emitter boost.
+
+### Fixed
+
+- Pixelated near-field shadows: cascade 0 now defaults to the canonical
+  4-direction layout, doubling probe density (2px grid) where shadow edges
+  are resolved; direction count is tunable (4 vs 16) for live comparison.
+- Visible cascade range rings: hits near an interval's far boundary now
+  cross-fade into the upper cascade's estimate (feathered hand-off) instead
+  of switching hard at a fixed radius.
+
 ## [0.2.4] - 2026-07-21
 
 ### Fixed

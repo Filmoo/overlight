@@ -18,6 +18,17 @@ export interface RenderContext {
   height: number;
 }
 
+/** A tunable rendering parameter, exposed to the tuning panel. */
+export interface ParamDef {
+  key: string;
+  label: string;
+  min: number;
+  max: number;
+  step: number;
+  /** Default value. Current value comes from getParam. */
+  value: number;
+}
+
 export interface RendererModule {
   readonly id: string;
   readonly capabilities: readonly Capability[];
@@ -25,4 +36,8 @@ export interface RendererModule {
   resize(width: number, height: number): void;
   render(world: World, dt: number, time: number): void;
   dispose(): void;
+  /** Optional tunables: renderers that expose these get the tuning panel for free. */
+  readonly params?: readonly ParamDef[];
+  setParam?(key: string, value: number): void;
+  getParam?(key: string): number | undefined;
 }
