@@ -30,11 +30,12 @@ import { SpriteWorld } from './sprites';
 const AMBIENT_HUE = new THREE.Vector3(0.52, 0.7, 1.0);
 
 const PARAM_DEFS: readonly ParamDef[] = [
-  { key: 'giScale', label: 'GI resolution', min: 0.4, max: 1.0, step: 0.05, value: 0.7 },
+  { key: 'giScale', label: 'GI resolution', min: 0.4, max: 1.0, step: 0.05, value: 1.0 },
   { key: 'tileExp', label: 'c0 dirs (4^x)', min: 1, max: 2, step: 1, value: 1 },
-  { key: 'basePx', label: 'c0 interval px', min: 4, max: 24, step: 1, value: 8 },
-  { key: 'history', label: 'temporal history', min: 0, max: 0.95, step: 0.01, value: 0.85 },
-  { key: 'feather', label: 'cascade feather', min: 0, max: 1, step: 0.05, value: 0.5 },
+  { key: 'basePx', label: 'c0 interval px', min: 1, max: 8, step: 0.5, value: 2 },
+  { key: 'history', label: 'temporal history', min: 0, max: 0.95, step: 0.01, value: 0.3 },
+  { key: 'feather', label: 'cascade feather', min: 0, max: 1, step: 0.05, value: 0 },
+  { key: 'jitter', label: 'ray jitter', min: 0, max: 1, step: 0.05, value: 0 },
   { key: 'intensity', label: 'light intensity', min: 0.2, max: 3, step: 0.05, value: 1.3 },
   { key: 'ambient', label: 'ambient level', min: 0, max: 0.4, step: 0.005, value: 0.115 },
   { key: 'boost', label: 'emitter boost', min: 1, max: 10, step: 0.1, value: 5.5 },
@@ -108,13 +109,13 @@ class Rc2dRenderer implements RendererModule {
     this.cascadeMat = rawMaterial(CASCADE_FS, {
       uScene: { value: null },
       uDist: { value: null },
-      uSeeds: { value: null },
       uUpper: { value: null },
       uHasUpper: { value: false },
       uRes: { value: new THREE.Vector2() },
       uCascadeIndex: { value: 0 },
       uBasePx: { value: this.p['basePx'] },
       uJitter: { value: 0 },
+      uJitterAmt: { value: this.p['jitter'] },
       uTileExp: { value: this.p['tileExp'] },
       uFeather: { value: this.p['feather'] },
     });
@@ -143,10 +144,11 @@ class Rc2dRenderer implements RendererModule {
     const rawH = Math.max(64, Math.floor(h * this.p['giScale']!));
 
     // Enough cascades for the top interval to span the GI buffer diagonal.
+    // Canonical intervals: top cascade (count-1) ends at 5·4^(count-2)·L0.
     const diag = Math.hypot(rawW, rawH);
     this.cascadeCount = Math.max(
       3,
-      Math.ceil(Math.log((3 * diag) / this.p['basePx']! + 1) / Math.log(4)),
+      2 + Math.ceil(Math.log(diag / (5 * this.p['basePx']!)) / Math.log(4)),
     );
 
     // The buffer MUST be a multiple of the top cascade's tile count —
@@ -208,6 +210,9 @@ class Rc2dRenderer implements RendererModule {
         break;
       case 'feather':
         this.cascadeMat.uniforms['uFeather']!.value = value;
+        break;
+      case 'jitter':
+        this.cascadeMat.uniforms['uJitterAmt']!.value = value;
         break;
       case 'intensity':
         this.compositeMat.uniforms['uIntensity']!.value = value;
@@ -281,7 +286,6 @@ class Rc2dRenderer implements RendererModule {
     // 3 — cascades, top down to 0
     this.cascadeMat.uniforms['uScene']!.value = this.rcSceneRT.texture;
     this.cascadeMat.uniforms['uDist']!.value = this.distRT.texture;
-    this.cascadeMat.uniforms['uSeeds']!.value = src.texture;
     this.cascadeMat.uniforms['uRes']!.value = giRes;
     this.cascadeMat.uniforms['uJitter']!.value = Math.random();
     let upper: THREE.WebGLRenderTarget | null = null;

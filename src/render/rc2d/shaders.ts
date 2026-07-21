@@ -58,15 +58,15 @@ export const CASCADE_FS = /* glsl */ `
 precision highp float;
 uniform sampler2D uScene;   // rgb: emission, a: surface
 uniform sampler2D uDist;    // r: distance field (px)
-uniform sampler2D uSeeds;   // rg: nearest surface position (px)
 uniform sampler2D uUpper;   // cascade n+1
 uniform bool uHasUpper;
 uniform vec2 uRes;          // GI buffer resolution (px)
 uniform float uCascadeIndex;
 uniform float uBasePx;      // cascade 0 interval length (px)
 uniform float uJitter;      // fresh random per frame, 0..1
+uniform float uJitterAmt;   // 0 = canonical deterministic rays
 uniform float uTileExp;     // tiles at c0 = 2^uTileExp (1 → 4 dirs, 2 → 16 dirs)
-uniform float uFeather;     // cross-fade width at cascade boundaries, 0..1
+uniform float uFeather;     // extra cross-fade at cascade boundaries, 0..1
 in vec2 vUv;
 out vec4 outColor;
 
@@ -89,17 +89,17 @@ void main() {
   float dirCount = tiles * tiles;
   float dirIndex = tile.y * tiles + tile.x;
 
-  // Per-frame jitter within this ray's angular cone: the temporal history
-  // integrates it into an effectively continuous set of directions,
-  // turning the hard direction fan into smooth penumbras.
+  // Canonical: deterministic ray through the center of its angular cone.
+  // Optional jitter (uJitterAmt > 0) trades structure for temporal noise.
   float rnd = hash13(vec3(probePx, dirIndex + uJitter * 61.803));
-  float ang = TAU * (dirIndex + 0.25 + 0.5 * rnd) / dirCount;
+  float ang = TAU * (dirIndex + 0.5 + (rnd - 0.5) * uJitterAmt) / dirCount;
   vec2 dir = vec2(cos(ang), sin(ang));
 
-  // Geometric ray intervals: cascade n covers [t0, t1), each 4x the previous,
-  // with half a probe spacing of overlap to hide seams between cascades.
-  float t0 = max(0.0, uBasePx * (pow(4.0, n) - 1.0) / 3.0 - tiles * 0.5);
-  float t1 = uBasePx * (pow(4.0, n + 1.0) - 1.0) / 3.0;
+  // Canonical intervals (jason.today/rc): start_n = 4^(n-1)·L, length_n =
+  // 4^n·L. Consecutive intervals overlap by 25% BY CONSTRUCTION — that
+  // overlap, not a hand-off hack, is what hides cascade seams.
+  float t0 = n == 0.0 ? 0.0 : uBasePx * pow(4.0, n - 1.0);
+  float t1 = t0 + uBasePx * pow(4.0, n);
 
   vec3 hitCol = vec3(0.0);
   bool hit = false;
@@ -110,11 +110,9 @@ void main() {
     if (p.x < 0.0 || p.y < 0.0 || p.x >= uRes.x || p.y >= uRes.y) break;
     float d = texture(uDist, p / uRes).r;
     if (d < 0.5) {
-      // Sample the emitter color at the actual surface (via the seed map),
-      // not at the march position — the march position often lands on an
-      // empty texel next to the surface and reads black.
-      vec2 seed = texture(uSeeds, p / uRes).rg;
-      hitCol = texture(uScene, seed / uRes).rgb;
+      // Canonical: sample the scene where the ray stopped. The GI scene has
+      // MSAA + soft-edged cores, so edge texels blend naturally.
+      hitCol = texture(uScene, p / uRes).rgb;
       hit = true;
       tHit = t;
       break;
@@ -123,9 +121,8 @@ void main() {
     if (t > t1) break;
   }
 
-  // Cross-fade band at the far end of the interval: a hit near the boundary
-  // blends toward the upper cascade's estimate instead of switching hard.
-  // Kills the visible rings at cascade range boundaries.
+  // Optional extra cross-fade band at the far end of the interval (the
+  // canonical 25% interval overlap already handles most seam hiding).
   float band = uFeather * 0.35 * (t1 - t0);
   float w = hit ? smoothstep(t1 - band, t1, tHit) : 1.0;
 
@@ -215,10 +212,12 @@ void main() {
 
   vec3 lit = albedo.rgb * (uAmbient + irr * uIntensity) + emission.rgb;
 
-  // DIAGNOSTIC MODE: plain tonemap + gamma only — no grade, no contrast
-  // curve — so the light field is seen as-is.
-  lit = lit / (lit + 1.0);
-  lit = pow(lit, vec3(1.0 / 2.2));
+  // Hue-preserving tonemap: Reinhard on LUMINANCE, not per channel.
+  // Per-channel compression saturates the dominant channel first, which
+  // whitens bright cores and leaves a colored ring at the falloff.
+  float lum = dot(lit, vec3(0.2126, 0.7152, 0.0722));
+  lit *= lum > 1e-4 ? (lum / (1.0 + lum)) / lum : 1.0;
+  lit = pow(clamp(lit, 0.0, 1.0), vec3(1.0 / 2.2));
 
   // Dither before 8-bit quantization: large smooth dark gradients would
   // otherwise show visible banding (Mach bands).

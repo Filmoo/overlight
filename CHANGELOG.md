@@ -4,6 +4,27 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/).
 
+## [0.2.6] - 2026-07-21
+
+### Fixed
+
+- Aligned the cascade solve with the canonical reference (jason.today/rc),
+  removing the artifacts that tuning could not fix:
+  - canonical intervals (`start = 4^(n-1)·L`, `length = 4^n·L`) with their
+    built-in 25% overlap — cascade range rings gone structurally, c0 interval
+    shrinks 8px → 2px so the near field is resolved by the densest probes;
+  - deterministic rays by default (jitter now opt-in, default 0) — the petal
+    noise around bright cores was the jitter itself;
+  - hits sample the scene at the ray position again (MSAA + soft cores make
+    that clean), matching the reference;
+  - GI buffer at full resolution by default (was 0.7x) — rock shadow edges
+    and near-fish gradients are no longer upsampled.
+- Colored rings around bright glows ("light rounds"): the tonemapper
+  compressed per channel, saturating the dominant channel first; now
+  Reinhard on luminance — hue survives, cores stay colored.
+- Temporal history relaxed to 0.3 (stability assist, no longer doing the
+  smoothing the solver should do itself).
+
 ## [0.2.5] - 2026-07-21
 
 ### Added
