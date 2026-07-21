@@ -1,0 +1,17 @@
+{
+  "name": "glowfish-topdown",
+  "view": { "kind": "ortho-topdown" },
+  "bounds": { "min": [0, 0, 0], "max": [12, 8, 3] },
+  "entities": [
+    { "prefab": "sand-floor", "pos": [6, 4, 0] },
+    { "prefab": "rock-round", "pos": [3.2, 2.4, 0.5], "scale": 1.6 },
+    { "prefab": "rock-round", "pos": [8.5, 5.8, 0.4], "scale": 2.2 },
+    { "prefab": "rock-round", "pos": [9.8, 2.2, 0.45], "scale": 1.2 },
+    { "prefab": "fish-glow", "pos": [2.0, 6.0, 1.5], "tint": [0.25, 0.85, 1.0] },
+    { "prefab": "fish-glow", "pos": [10.0, 3.0, 2.0], "tint": [1.0, 0.35, 0.85] },
+    { "prefab": "fish-glow", "pos": [5.0, 5.0, 1.0], "tint": [1.0, 0.72, 0.25] },
+    { "prefab": "fish-glow", "pos": [7.0, 2.0, 2.2], "tint": [0.5, 1.0, 0.4] },
+    { "prefab": "fish-glow", "pos": [4.0, 1.5, 1.8], "tint": [0.35, 0.55, 1.0] },
+    { "prefab": "fish-glow", "pos": [11.0, 6.5, 1.2], "tint": [1.0, 0.45, 0.35] }
+  ]
+}
