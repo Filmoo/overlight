@@ -4,6 +4,23 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/).
 
+## [0.2.0] - 2026-07-21
+
+### Added
+
+- `rc2d` renderer: real-time 2D global illumination via radiance cascades —
+  scene passes (albedo / emission / GI scene) → jump-flood distance field →
+  cascade solve (16 directions at cascade 0, 4× per level) → tonemapped
+  composite with premultiplied alpha for OBS. ~2–4 ms per frame at 1080p.
+- Visual pass: procedural sand (fbm grain), shaded rocks, fish silhouettes
+  with wiggling tails and eyes, soft glow gradients with a gentle pulse.
+- `rc2d` is now the default renderer; `flat` remains available as ground truth.
+
+### Changed
+
+- Cooler sand and lighter rock palette in the world prefabs (map data, applies
+  to all renderers).
+
 ## [0.1.0] - 2026-07-21
 
 ### Added

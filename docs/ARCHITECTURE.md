@@ -93,11 +93,16 @@ technique eats. That conversion lives here, shared between renderers:
 
 | version | goal                                                               |
 | ------- | ------------------------------------------------------------------ |
-| v0.1    | skeleton: host + world + sim + flat renderer + control panel       |
-| v0.2    | `rc2d` renderer: JFA distance field + radiance cascades 2D GI      |
-| v0.3    | media interpretation: water tint, projected caustics, god rays     |
-| v0.4    | spawn API (console-callable) — the future Twitch hook point        |
-| v0.5    | second non-aquarium map to prove generality                        |
+| v0.1 ✓  | skeleton: host + world + sim + flat renderer + control panel       |
+| v0.2 ✓  | `rc2d` renderer: JFA distance field + radiance cascades 2D GI      |
+| v0.3    | `march3d` renderer: SDF raymarcher with true 3D ray-traced shadows |
+| v0.4    | media interpretation: water tint, projected caustics, god rays     |
+| v0.5    | spawn API (console-callable) — the future Twitch hook point        |
+| v0.6    | second non-aquarium map to prove generality                        |
+
+Known rc2d limitations (accepted for now): probe merges skip the canonical
+half-probe offsets, so faint low-frequency mottling can appear in far-field
+light; occluder interiors receive ambient only.
 
 Heavy experiments (path tracing, radiant foam, splatting) live in
 `experiments/` when they arrive — never on the live overlay path.

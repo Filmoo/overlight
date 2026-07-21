@@ -1,6 +1,6 @@
 {
   "name": "overlight",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "Modular real-time rendering engine for OBS overlays — maps × renderers, swappable at will.",

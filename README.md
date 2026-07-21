@@ -4,9 +4,10 @@ A modular real-time rendering engine for OBS overlays. Maps describe worlds;
 renderers interpret them; the two never touch. Swap rendering techniques with a
 query param.
 
-**Status: v0.1** — architecture skeleton with the `flat` debug renderer and the
-`glowfish-topdown` map. The first real technique (2D radiance cascades GI) lands
-in v0.2.
+**Status: v0.2** — the `rc2d` renderer is live: real-time 2D global illumination
+via radiance cascades (JFA distance field → cascades → composite). Glowing fish
+pour colored light onto the sand; rocks cast soft shadows. Full pipeline ~2–4 ms
+per frame at 1080p. The `flat` debug renderer remains as ground truth.
 
 ## Quick start (dev)
 
@@ -36,7 +37,7 @@ query params in the Browser source URL field.
 | param      | default            | meaning                                     |
 | ---------- | ------------------ | ------------------------------------------- |
 | `map`      | `glowfish-topdown` | which world to load                         |
-| `renderer` | `flat`             | which rendering technique draws it          |
+| `renderer` | `rc2d`             | rendering technique: `rc2d` (GI) or `flat`  |
 | `fps`      | `60`               | render cap (15–120); match your stream      |
 | `debug`    | auto               | `1` forces the checkerboard backdrop        |
 
