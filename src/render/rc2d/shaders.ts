@@ -58,6 +58,7 @@ export const CASCADE_FS = /* glsl */ `
 precision highp float;
 uniform sampler2D uScene;   // rgb: emission, a: surface
 uniform sampler2D uDist;    // r: distance field (px)
+uniform sampler2D uSeeds;   // rg: nearest surface position (px)
 uniform sampler2D uUpper;   // cascade n+1
 uniform bool uHasUpper;
 uniform vec2 uRes;          // GI buffer resolution (px)
@@ -82,7 +83,8 @@ void main() {
   vec2 dir = vec2(cos(ang), sin(ang));
 
   // Geometric ray intervals: cascade n covers [t0, t1), each 4x the previous.
-  float t0 = uBasePx * (pow(4.0, n) - 1.0) / 3.0;
+  // Intervals overlap by one probe spacing to hide the seams between cascades.
+  float t0 = max(0.0, uBasePx * (pow(4.0, n) - 1.0) / 3.0 - tiles);
   float t1 = uBasePx * (pow(4.0, n + 1.0) - 1.0) / 3.0;
 
   vec3 radiance = vec3(0.0);
@@ -93,7 +95,11 @@ void main() {
     if (p.x < 0.0 || p.y < 0.0 || p.x >= uRes.x || p.y >= uRes.y) break;
     float d = texture(uDist, p / uRes).r;
     if (d < 1.0) {
-      radiance = texture(uScene, p / uRes).rgb;
+      // Sample the emitter color at the actual surface (via the seed map),
+      // not at the march position — the march position often lands on an
+      // empty texel next to the surface and reads black.
+      vec2 seed = texture(uSeeds, p / uRes).rg;
+      radiance = texture(uScene, seed / uRes).rgb;
       hit = true;
       break;
     }
@@ -118,6 +124,20 @@ void main() {
   }
 
   outColor = vec4(radiance, 1.0);
+}
+`;
+
+export const TEMPORAL_FS = /* glsl */ `
+precision highp float;
+uniform sampler2D uCurr;
+uniform sampler2D uPrev;
+uniform float uBlend; // history weight
+in vec2 vUv;
+out vec4 outColor;
+void main() {
+  vec3 curr = texture(uCurr, vUv).rgb;
+  vec3 prev = texture(uPrev, vUv).rgb;
+  outColor = vec4(mix(curr, prev, uBlend), 1.0);
 }
 `;
 

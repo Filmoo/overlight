@@ -4,6 +4,20 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/).
 
+## [0.2.1] - 2026-07-21
+
+### Fixed
+
+- rc2d flicker: float32 JFA seeds (half precision wobbled at large
+  coordinates) + a temporal accumulation pass (EMA over frames) stabilize the
+  light field.
+- rc2d hit-color noise ("weird patterns"): rays now sample the emitter color
+  at the exact nearest surface via the seed map instead of the march position,
+  which often landed on an empty texel and read black.
+- rc2d light seams: cascade ray intervals now overlap by one probe spacing so
+  emitters no longer pop when crossing interval boundaries.
+- Softer glow pulse (8% → 5%).
+
 ## [0.2.0] - 2026-07-21
 
 ### Added

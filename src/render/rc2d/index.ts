@@ -3,7 +3,14 @@ import type { World } from '../../world/components';
 import { fitTopDown } from '../api/extract/planar';
 import type { Capability, RenderContext, RendererModule } from '../api/renderer';
 import { FSQuad, makeTarget, rawMaterial } from './pipeline';
-import { CASCADE_FS, COMPOSITE_FS, JFA_DIST_FS, JFA_SEED_FS, JFA_STEP_FS } from './shaders';
+import {
+  CASCADE_FS,
+  COMPOSITE_FS,
+  JFA_DIST_FS,
+  JFA_SEED_FS,
+  JFA_STEP_FS,
+  TEMPORAL_FS,
+} from './shaders';
 import { SpriteWorld } from './sprites';
 
 /**
@@ -40,11 +47,14 @@ class Rc2dRenderer implements RendererModule {
   private distRT!: THREE.WebGLRenderTarget;
   private cascadeA!: THREE.WebGLRenderTarget;
   private cascadeB!: THREE.WebGLRenderTarget;
+  private histA!: THREE.WebGLRenderTarget;
+  private histB!: THREE.WebGLRenderTarget;
 
   private seedMat!: THREE.RawShaderMaterial;
   private stepMat!: THREE.RawShaderMaterial;
   private distMat!: THREE.RawShaderMaterial;
   private cascadeMat!: THREE.RawShaderMaterial;
+  private temporalMat!: THREE.RawShaderMaterial;
   private compositeMat!: THREE.RawShaderMaterial;
 
   private giW = 1;
@@ -80,11 +90,17 @@ class Rc2dRenderer implements RendererModule {
     this.cascadeMat = rawMaterial(CASCADE_FS, {
       uScene: { value: null },
       uDist: { value: null },
+      uSeeds: { value: null },
       uUpper: { value: null },
       uHasUpper: { value: false },
       uRes: { value: new THREE.Vector2() },
       uCascadeIndex: { value: 0 },
       uBasePx: { value: BASE_INTERVAL_PX },
+    });
+    this.temporalMat = rawMaterial(TEMPORAL_FS, {
+      uCurr: { value: null },
+      uPrev: { value: null },
+      uBlend: { value: 0.8 },
     });
     this.compositeMat = rawMaterial(COMPOSITE_FS, {
       uAlbedo: { value: null },
@@ -107,11 +123,15 @@ class Rc2dRenderer implements RendererModule {
     this.albedoRT = makeTarget(w, h);
     this.emissionRT = makeTarget(w, h);
     this.rcSceneRT = makeTarget(this.giW, this.giH);
-    this.jfaA = makeTarget(this.giW, this.giH, { filter: THREE.NearestFilter });
-    this.jfaB = makeTarget(this.giW, this.giH, { filter: THREE.NearestFilter });
+    // Float32 seeds: half precision wobbles at large coordinates and the
+    // wobble reads as flicker in the light field.
+    this.jfaA = makeTarget(this.giW, this.giH, { filter: THREE.NearestFilter, type: THREE.FloatType });
+    this.jfaB = makeTarget(this.giW, this.giH, { filter: THREE.NearestFilter, type: THREE.FloatType });
     this.distRT = makeTarget(this.giW, this.giH);
     this.cascadeA = makeTarget(this.giW, this.giH);
     this.cascadeB = makeTarget(this.giW, this.giH);
+    this.histA = makeTarget(this.giW, this.giH);
+    this.histB = makeTarget(this.giW, this.giH);
 
     // Enough cascades for the top interval to span the GI buffer diagonal.
     const diag = Math.hypot(this.giW, this.giH);
@@ -131,6 +151,8 @@ class Rc2dRenderer implements RendererModule {
       this.distRT,
       this.cascadeA,
       this.cascadeB,
+      this.histA,
+      this.histB,
     ]) {
       rt?.dispose();
     }
@@ -188,6 +210,7 @@ class Rc2dRenderer implements RendererModule {
     // 3 — cascades, top down to 0
     this.cascadeMat.uniforms['uScene']!.value = this.rcSceneRT.texture;
     this.cascadeMat.uniforms['uDist']!.value = this.distRT.texture;
+    this.cascadeMat.uniforms['uSeeds']!.value = src.texture;
     this.cascadeMat.uniforms['uRes']!.value = giRes;
     let upper: THREE.WebGLRenderTarget | null = null;
     let ping = this.cascadeA;
@@ -201,10 +224,16 @@ class Rc2dRenderer implements RendererModule {
       [ping, pong] = [pong, ping];
     }
 
-    // 4 — composite to canvas
+    // 4 — temporal accumulation: EMA over frames stabilizes the light field
+    this.temporalMat.uniforms['uCurr']!.value = upper!.texture;
+    this.temporalMat.uniforms['uPrev']!.value = this.histA.texture;
+    this.quad.render(gl, this.temporalMat, this.histB);
+    [this.histA, this.histB] = [this.histB, this.histA];
+
+    // 5 — composite to canvas
     this.compositeMat.uniforms['uAlbedo']!.value = this.albedoRT.texture;
     this.compositeMat.uniforms['uEmission']!.value = this.emissionRT.texture;
-    this.compositeMat.uniforms['uCascade0']!.value = upper!.texture;
+    this.compositeMat.uniforms['uCascade0']!.value = this.histA.texture;
     this.compositeMat.uniforms['uGiRes']!.value = giRes;
     this.quad.render(gl, this.compositeMat, null);
   }

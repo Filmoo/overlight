@@ -4,12 +4,13 @@ import * as THREE from 'three';
 
 export interface TargetOpts {
   filter?: THREE.MagnificationTextureFilter;
+  type?: THREE.TextureDataType;
 }
 
 export function makeTarget(w: number, h: number, opts: TargetOpts = {}): THREE.WebGLRenderTarget {
   const filter = opts.filter ?? THREE.LinearFilter;
   return new THREE.WebGLRenderTarget(w, h, {
-    type: THREE.HalfFloatType,
+    type: opts.type ?? THREE.HalfFloatType,
     format: THREE.RGBAFormat,
     minFilter: filter,
     magFilter: filter,

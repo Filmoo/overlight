@@ -239,7 +239,7 @@ export class SpriteWorld {
       f.rcMesh.position.set(p.x, p.y, p.z);
       // Tail wiggle + gentle glow pulse: renderer-side life, sim stays clean.
       f.tail.rotation.z = Math.sin(time * 6.0 + f.phase) * 0.3;
-      const pulse = 1.0 + 0.08 * Math.sin(time * 1.3 + f.phase);
+      const pulse = 1.0 + 0.05 * Math.sin(time * 1.3 + f.phase);
       const glowMat = f.glowMats[0]!;
       (glowMat.uniforms['uStrength'] as THREE.IUniform).value =
         e.material.emissiveStrength * pulse;
