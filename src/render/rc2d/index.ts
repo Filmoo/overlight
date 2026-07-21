@@ -43,7 +43,8 @@ const PARAM_DEFS: readonly ParamDef[] = [
   { key: 'intensity', label: 'light intensity', min: 0.2, max: 3, step: 0.05, value: 1.3 },
   { key: 'ambient', label: 'ambient level', min: 0, max: 0.4, step: 0.005, value: 0.115 },
   { key: 'boost', label: 'emitter boost', min: 1, max: 10, step: 0.1, value: 5.5 },
-  { key: 'debugView', label: 'view (0 final · 1 GI · 2 no glow)', min: 0, max: 2, step: 1, value: 0 },
+  { key: 'relief', label: 'surface relief', min: 0, max: 1.5, step: 0.05, value: 0.9 },
+  { key: 'debugView', label: 'view 0fin·1GI·2noglow·3norm', min: 0, max: 3, step: 1, value: 0 },
 ];
 
 class Rc2dRenderer implements RendererModule {
@@ -63,6 +64,7 @@ class Rc2dRenderer implements RendererModule {
 
   private albedoRT!: THREE.WebGLRenderTarget;
   private emissionRT!: THREE.WebGLRenderTarget;
+  private normalRT!: THREE.WebGLRenderTarget;
   private rcSceneRT!: THREE.WebGLRenderTarget;
   private jfaA!: THREE.WebGLRenderTarget;
   private jfaB!: THREE.WebGLRenderTarget;
@@ -146,9 +148,12 @@ class Rc2dRenderer implements RendererModule {
     this.compositeMat = rawMaterial(COMPOSITE_FS, {
       uAlbedo: { value: null },
       uEmission: { value: null },
+      uNormal: { value: null },
       uIrr: { value: null },
+      uGiTexel: { value: new THREE.Vector2() },
       uAmbient: { value: AMBIENT_HUE.clone().multiplyScalar(this.p['ambient']!) },
       uIntensity: { value: this.p['intensity'] },
+      uRelief: { value: this.p['relief'] },
       uDebugView: { value: this.p['debugView'] },
     });
 
@@ -180,6 +185,7 @@ class Rc2dRenderer implements RendererModule {
     // fish, tank border) come out clean instead of 1px staircases.
     this.albedoRT = makeTarget(w, h, { samples: 4 });
     this.emissionRT = makeTarget(w, h, { samples: 4 });
+    this.normalRT = makeTarget(w, h, { samples: 4 });
     this.rcSceneRT = makeTarget(this.giW, this.giH, { samples: 4 });
     // Float32 seeds: half precision wobbles at large coordinates and the
     // wobble reads as flicker in the light field.
@@ -198,6 +204,7 @@ class Rc2dRenderer implements RendererModule {
     for (const rt of [
       this.albedoRT,
       this.emissionRT,
+      this.normalRT,
       this.rcSceneRT,
       this.jfaA,
       this.jfaB,
@@ -238,6 +245,9 @@ class Rc2dRenderer implements RendererModule {
         break;
       case 'intensity':
         this.compositeMat.uniforms['uIntensity']!.value = value;
+        break;
+      case 'relief':
+        this.compositeMat.uniforms['uRelief']!.value = value;
         break;
       case 'ambient':
         (this.compositeMat.uniforms['uAmbient']!.value as THREE.Vector3)
@@ -284,6 +294,13 @@ class Rc2dRenderer implements RendererModule {
     gl.setRenderTarget(this.rcSceneRT);
     gl.clear();
     gl.render(this.sprites.rcScene, this.camera);
+    // Normals clear to flat up-facing (0.5,0.5,1) so uncovered pixels (fish,
+    // gaps) contribute no relief; surfaces with relief overwrite it.
+    gl.setClearColor(0x8080ff, 1);
+    gl.setRenderTarget(this.normalRT);
+    gl.clear();
+    gl.render(this.sprites.normal, this.camera);
+    gl.setClearColor(0x000000, 0); // restore transparent clear for the rest
 
     const giRes = new THREE.Vector2(this.giW, this.giH);
 
@@ -351,7 +368,12 @@ class Rc2dRenderer implements RendererModule {
     // 7 — composite to canvas
     this.compositeMat.uniforms['uAlbedo']!.value = this.albedoRT.texture;
     this.compositeMat.uniforms['uEmission']!.value = this.emissionRT.texture;
+    this.compositeMat.uniforms['uNormal']!.value = this.normalRT.texture;
     this.compositeMat.uniforms['uIrr']!.value = this.irrA.texture;
+    (this.compositeMat.uniforms['uGiTexel']!.value as THREE.Vector2).set(
+      2 / this.giW,
+      2 / this.giH,
+    );
     this.quad.render(gl, this.compositeMat, null);
   }
 

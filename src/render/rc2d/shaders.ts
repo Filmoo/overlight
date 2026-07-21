@@ -228,25 +228,49 @@ export const COMPOSITE_FS = /* glsl */ `
 precision highp float;
 uniform sampler2D uAlbedo;    // full-res albedo (a: coverage)
 uniform sampler2D uEmission;  // full-res emission glows
+uniform sampler2D uNormal;    // full-res surface normals (encoded)
 uniform sampler2D uIrr;       // resolved + blurred irradiance
+uniform vec2 uGiTexel;        // gradient step for light-direction reconstruction
 uniform vec3 uAmbient;
 uniform float uIntensity;
-uniform float uDebugView;     // 0 = final, 1 = raw GI field, 2 = GI x albedo (no glow)
+uniform float uRelief;        // strength of normal-based relief shading
+uniform float uDebugView;     // 0 final · 1 raw GI · 2 no glow · 3 normals
 in vec2 vUv;
 out vec4 outColor;
+
+const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 
 void main() {
   vec4 albedo = texture(uAlbedo, vUv);
   vec4 emission = texture(uEmission, vUv);
   vec3 irr = texture(uIrr, vUv).rgb;
+  vec3 nrm = texture(uNormal, vUv).rgb * 2.0 - 1.0;
 
   if (uDebugView > 0.5 && uDebugView < 1.5) {
     // Raw GI irradiance, gamma only — judge the solver with no makeup.
     outColor = vec4(pow(clamp(irr, 0.0, 1.0), vec3(1.0 / 2.2)), 1.0);
     return;
   }
+  if (uDebugView > 2.5) {
+    outColor = vec4(nrm * 0.5 + 0.5, 1.0); // normal buffer view
+    return;
+  }
 
-  vec3 lit = albedo.rgb * (uAmbient + irr * uIntensity);
+  // Reconstruct the incoming light direction from the irradiance gradient:
+  // the field brightens toward light sources, so grad(irr) points at them.
+  // The denominator keeps flat, evenly-lit regions from picking up a
+  // spurious direction (grad ~ 0 there -> near-zero rake -> no relief).
+  float lc = dot(irr, LUMA);
+  float lx = dot(texture(uIrr, vUv + vec2(uGiTexel.x, 0.0)).rgb, LUMA)
+           - dot(texture(uIrr, vUv - vec2(uGiTexel.x, 0.0)).rgb, LUMA);
+  float ly = dot(texture(uIrr, vUv + vec2(0.0, uGiTexel.y)).rgb, LUMA)
+           - dot(texture(uIrr, vUv - vec2(0.0, uGiTexel.y)).rgb, LUMA);
+  vec2 grad = vec2(lx, ly);
+  vec2 lightDir = grad / (length(grad) + 0.0006);
+  float rake = dot(nrm.xy, lightDir);
+  float form = max(0.0, 1.0 + uRelief * rake);
+
+  vec3 lit = albedo.rgb * (uAmbient + irr * uIntensity * form);
   if (uDebugView < 1.5) lit += emission.rgb;
 
   // Hue-preserving tonemap: Reinhard on LUMINANCE, not per channel.

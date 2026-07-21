@@ -20,8 +20,6 @@ void main() {
 }
 `;
 
-// Kept for when texture detail returns after the GI diagnosis.
-// @ts-expect-error TS6133 — intentionally unused in diagnostic mode
 const NOISE = /* glsl */ `
 float hash21(vec2 p) {
   return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
@@ -40,20 +38,94 @@ float fbm(vec2 p) {
 }
 `;
 
-// DIAGNOSTIC MODE: sand and rocks are flat colors so any visible pattern
-// must come from the GI pipeline itself. Texture detail returns once the
-// light field is proven smooth. (fbm helpers in NOISE, currently unused.)
-const SAND_FS = /* glsl */ `
-uniform vec3 uColor;
-void main() {
-  gl_FragColor = vec4(uColor, 1.0);
+// Sand as a HEIGHT field: gentle domain-warped ripples. The visual interest
+// comes from light raking across relief (via the normal), not brightness noise.
+const SAND_HEIGHT = /* glsl */ `
+float sandHeight(vec2 p) {
+  float warp = fbm(p * 0.5);
+  float h = sin(p.x * 2.1 + warp * 3.0) * 0.5;
+  h += sin(p.y * 1.4 - warp * 2.0) * 0.3;
+  h += (fbm(p * 2.3) - 0.5) * 0.5;   // fine grain, still low amplitude
+  return h;
 }
 `;
 
-const ROCK_FS = /* glsl */ `
+const SAND_ALBEDO_FS = /* glsl */ `
 uniform vec3 uColor;
+varying vec2 vWorld;
+${NOISE}
 void main() {
-  gl_FragColor = vec4(uColor, 1.0);
+  // Only broad, soft tonal patches in albedo — the ripples live in the normal.
+  float patches = fbm(vWorld * 0.45) - 0.5;
+  gl_FragColor = vec4(uColor * (1.0 + patches * 0.10), 1.0);
+}
+`;
+
+const SAND_NORMAL_FS = /* glsl */ `
+uniform float uAmp;
+varying vec2 vWorld;
+${NOISE}
+${SAND_HEIGHT}
+void main() {
+  float e = 0.06;
+  float hx = sandHeight(vWorld + vec2(e, 0.0)) - sandHeight(vWorld - vec2(e, 0.0));
+  float hy = sandHeight(vWorld + vec2(0.0, e)) - sandHeight(vWorld - vec2(0.0, e));
+  vec2 n2 = -vec2(hx, hy) / (2.0 * e) * uAmp;
+  vec3 N = normalize(vec3(n2, 1.0));
+  gl_FragColor = vec4(N * 0.5 + 0.5, 1.0);
+}
+`;
+
+// A rock is an irregular SDF blob (per-instance seed) with a domed height.
+// Shared shape function so albedo / normal / occluder agree exactly.
+const ROCK_SHAPE = /* glsl */ `
+uniform float uRadius;
+uniform float uSeed;
+varying vec2 vLocal;
+${NOISE}
+// returns signed distance; writes normalized radial coord u (0 center .. 1 rim)
+float rockShape(vec2 p, out float u) {
+  float ang = atan(p.y, p.x);
+  float wob = 0.14 * sin(ang * 3.0 + uSeed)
+            + 0.07 * sin(ang * 7.0 - uSeed * 1.7)
+            + 0.04 * sin(ang * 13.0 + uSeed * 0.5);
+  float R = uRadius * (0.80 + wob * 0.5);
+  float len = length(p);
+  u = len / R;
+  return len - R;
+}
+`;
+
+const ROCK_ALBEDO_FS = /* glsl */ `
+uniform vec3 uColor;
+${ROCK_SHAPE}
+void main() {
+  float u; float d = rockShape(vLocal, u);
+  if (d > 0.0) discard;
+  float ao = mix(0.62, 1.05, smoothstep(1.0, 0.35, u)); // darker crevice at rim
+  float grain = (fbm(vLocal * 16.0 + uSeed) - 0.5) * 0.14;
+  gl_FragColor = vec4(uColor * (ao + grain), 1.0);
+}
+`;
+
+const ROCK_NORMAL_FS = /* glsl */ `
+${ROCK_SHAPE}
+void main() {
+  float u; float d = rockShape(vLocal, u);
+  if (d > 0.0) discard;
+  float slope = smoothstep(0.15, 1.0, u); // flat on top, steep at the rim
+  vec2 n2 = normalize(vLocal + vec2(1e-5)) * slope * 0.95;
+  vec3 N = normalize(vec3(n2, 1.0));
+  gl_FragColor = vec4(N * 0.5 + 0.5, 1.0);
+}
+`;
+
+const ROCK_OCCLUDER_FS = /* glsl */ `
+${ROCK_SHAPE}
+void main() {
+  float u; float d = rockShape(vLocal, u);
+  if (d > 0.0) discard;
+  gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0); // opaque, non-emitting occluder
 }
 `;
 
@@ -118,6 +190,7 @@ export class SpriteWorld {
   readonly albedo = new THREE.Scene();
   readonly emission = new THREE.Scene();
   readonly rcScene = new THREE.Scene();
+  readonly normal = new THREE.Scene();
   private fish = new Map<number, FishParts>();
 
   /** Brightness of fish cores as GI light sources. */
@@ -138,41 +211,66 @@ export class SpriteWorld {
 
   private addFloor(e: Entity): void {
     if (e.shape.kind !== 'box') return;
-    const mat = new THREE.ShaderMaterial({
-      vertexShader: SPRITE_VS,
-      fragmentShader: SAND_FS,
-      uniforms: { uColor: { value: new THREE.Color(...e.material.albedo) } },
-    });
-    const mesh = new THREE.Mesh(
-      new THREE.PlaneGeometry(e.shape.size.x * e.transform.scale, e.shape.size.y * e.transform.scale),
-      mat,
+    const w = e.shape.size.x * e.transform.scale;
+    const h = e.shape.size.y * e.transform.scale;
+    const geo = new THREE.PlaneGeometry(w, h);
+    const albedoMesh = new THREE.Mesh(
+      geo,
+      new THREE.ShaderMaterial({
+        vertexShader: SPRITE_VS,
+        fragmentShader: SAND_ALBEDO_FS,
+        uniforms: { uColor: { value: new THREE.Color(...e.material.albedo) } },
+      }),
     );
-    mesh.position.set(e.transform.pos.x, e.transform.pos.y, 0);
-    mesh.renderOrder = 0;
-    this.albedo.add(mesh);
+    albedoMesh.position.set(e.transform.pos.x, e.transform.pos.y, 0);
+    albedoMesh.renderOrder = 0;
+    this.albedo.add(albedoMesh);
+
+    const normalMesh = new THREE.Mesh(
+      geo.clone(),
+      new THREE.ShaderMaterial({
+        vertexShader: SPRITE_VS,
+        fragmentShader: SAND_NORMAL_FS,
+        uniforms: { uAmp: { value: 0.12 } },
+      }),
+    );
+    normalMesh.position.copy(albedoMesh.position);
+    this.normal.add(normalMesh);
   }
 
   private addRock(e: Entity): void {
     if (e.shape.kind !== 'sphere') return;
     const r = e.shape.radius * e.transform.scale;
-    const geo = new THREE.CircleGeometry(r, 48);
-    const albedoMat = new THREE.ShaderMaterial({
-      vertexShader: SPRITE_VS,
-      fragmentShader: ROCK_FS,
-      uniforms: {
-        uColor: { value: new THREE.Color(...e.material.albedo) },
-        uRadius: { value: r },
-      },
+    const seed = (e.id * 12.9898) % 6.2831853;
+    // Quad large enough to contain the wobbled silhouette (up to ~1.15r).
+    const geo = new THREE.PlaneGeometry(r * 2.6, r * 2.6);
+    const uniforms = (): Record<string, THREE.IUniform> => ({
+      uColor: { value: new THREE.Color(...e.material.albedo) },
+      uRadius: { value: r },
+      uSeed: { value: seed },
     });
-    const albedoMesh = new THREE.Mesh(geo, albedoMat);
-    albedoMesh.position.set(e.transform.pos.x, e.transform.pos.y, e.transform.pos.z);
+    const pos = e.transform.pos;
+
+    const albedoMesh = new THREE.Mesh(
+      geo,
+      new THREE.ShaderMaterial({ vertexShader: SPRITE_VS, fragmentShader: ROCK_ALBEDO_FS, uniforms: uniforms() }),
+    );
+    albedoMesh.position.set(pos.x, pos.y, pos.z);
     albedoMesh.renderOrder = 1;
     this.albedo.add(albedoMesh);
 
-    // Occluder for the GI solver: opaque, non-emitting.
+    const normalMesh = new THREE.Mesh(
+      geo.clone(),
+      new THREE.ShaderMaterial({ vertexShader: SPRITE_VS, fragmentShader: ROCK_NORMAL_FS, uniforms: uniforms() }),
+    );
+    normalMesh.position.copy(albedoMesh.position);
+    normalMesh.renderOrder = 1;
+    this.normal.add(normalMesh);
+
+    // Occluder for the GI solver: same irregular silhouette, opaque + black.
     const rcMesh = new THREE.Mesh(
       geo.clone(),
-      new THREE.MeshBasicMaterial({ color: 0x000000 }),
+      new THREE.ShaderMaterial({ vertexShader: SPRITE_VS, fragmentShader: ROCK_OCCLUDER_FS, uniforms: uniforms() }),
     );
     rcMesh.position.copy(albedoMesh.position);
     this.rcScene.add(rcMesh);
@@ -274,7 +372,7 @@ export class SpriteWorld {
   }
 
   dispose(): void {
-    for (const scene of [this.albedo, this.emission, this.rcScene]) {
+    for (const scene of [this.albedo, this.emission, this.rcScene, this.normal]) {
       scene.traverse((obj) => {
         if (obj instanceof THREE.Mesh) {
           obj.geometry.dispose();

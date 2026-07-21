@@ -4,6 +4,32 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/).
 
+## [0.3.0] - 2026-07-21
+
+The aquarium look: fake 2.5D relief so surfaces respond to light direction.
+
+### Added
+
+- **Light-direction reconstruction** from the irradiance gradient (the field
+  brightens toward sources, so its gradient points at them). Surfaces are
+  then shaded by how they face the light — the enabling trick for relief.
+- **Normal G-buffer**: a 4th scene pass renders per-pixel surface normals,
+  cleared to flat up-facing where nothing covers it.
+- **Rocks are rocks**: irregular per-instance SDF silhouettes (no more
+  identical circles) with a domed height → outward normals, so a fish lights
+  the near side and shadows the far side. The GI occluder uses the same
+  silhouette, so shadows match the visible shape.
+- **Sand as relief, not noise**: a low-frequency domain-warped height field
+  drives ripple normals; light rakes across them. Albedo carries only broad
+  soft tonal patches.
+- `relief` param (normal-shading strength) and a normals debug view (3).
+
+### Note
+
+- Frame cost rose to ~20 ms with the extra full-res normal pass; `GI
+  resolution` and `blur` remain the levers if it needs trimming on weaker
+  GPUs.
+
 ## [0.2.8] - 2026-07-21
 
 Studied a complete reference implementation and fixed the ringing at its
