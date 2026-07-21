@@ -5,6 +5,8 @@ import * as THREE from 'three';
 export interface TargetOpts {
   filter?: THREE.MagnificationTextureFilter;
   type?: THREE.TextureDataType;
+  /** MSAA sample count — use on targets that rasterize geometry. */
+  samples?: number;
 }
 
 export function makeTarget(w: number, h: number, opts: TargetOpts = {}): THREE.WebGLRenderTarget {
@@ -16,6 +18,7 @@ export function makeTarget(w: number, h: number, opts: TargetOpts = {}): THREE.W
     magFilter: filter,
     depthBuffer: false,
     stencilBuffer: false,
+    samples: opts.samples ?? 0,
   });
 }
 

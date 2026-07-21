@@ -4,6 +4,23 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/).
 
+## [0.2.2] - 2026-07-21
+
+### Fixed
+
+- Jagged silhouettes: 4x MSAA on all geometry passes (albedo, emission, GI
+  scene) — rock rims, fish outlines, and the tank border are clean.
+- Light-pool rings: GI light cores now have a radial falloff, so rays hitting
+  the rim pick up dimmer color and pools fade smoothly (emission boost
+  retuned to compensate).
+- Gradient banding: dithered before 8-bit output — Mach bands on the large
+  smooth dark gradients are gone.
+
+### Changed
+
+- GI buffer 0.5x → 0.6x canvas resolution for finer shadow gradients
+  (still ~4 ms per frame with MSAA).
+
 ## [0.2.1] - 2026-07-21
 
 ### Fixed

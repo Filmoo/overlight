@@ -66,6 +66,19 @@ void main() {
 }
 `;
 
+const CORE_FS = /* glsl */ `
+uniform vec3 uColor;
+uniform float uRadius;
+varying vec2 vLocal;
+void main() {
+  // Radial falloff inside the GI light disc: rays hitting the rim pick up a
+  // dimmer color, so light pools fade smoothly instead of ringing.
+  float r = length(vLocal) / uRadius;
+  float fall = mix(1.0, 0.25, smoothstep(0.3, 1.0, r));
+  gl_FragColor = vec4(uColor * fall, 1.0);
+}
+`;
+
 const GLOW_FS = /* glsl */ `
 uniform vec3 uColor;
 uniform float uStrength;
@@ -103,7 +116,7 @@ interface FishParts {
   rcMesh: THREE.Mesh;
   tail: THREE.Mesh;
   glowMats: THREE.ShaderMaterial[];
-  rcMat: THREE.MeshBasicMaterial;
+  rcMat: THREE.ShaderMaterial;
   tint: THREE.Color;
   phase: number;
 }
@@ -115,7 +128,7 @@ export class SpriteWorld {
   private fish = new Map<number, FishParts>();
 
   /** Brightness of fish cores as GI light sources. */
-  static readonly EMISSION_BOOST = 3.5;
+  static readonly EMISSION_BOOST = 5.5;
 
   constructor(world: World) {
     for (const e of world.entities) {
@@ -208,11 +221,22 @@ export class SpriteWorld {
     const emissionMesh = new THREE.Mesh(new THREE.PlaneGeometry(glowR * 2, glowR * 2), glowMat);
     this.emission.add(emissionMesh);
 
-    // GI light source: a solid bright core (fish don't occlude — they float).
-    const rcMat = new THREE.MeshBasicMaterial({
-      color: tint.clone().multiplyScalar(SpriteWorld.EMISSION_BOOST * e.material.emissiveStrength),
+    // GI light source: a bright core with radial falloff (fish don't occlude
+    // — they float above the light plane).
+    const coreR = 0.8 * r;
+    const rcMat = new THREE.ShaderMaterial({
+      vertexShader: SPRITE_VS,
+      fragmentShader: CORE_FS,
+      uniforms: {
+        uColor: {
+          value: tint
+            .clone()
+            .multiplyScalar(SpriteWorld.EMISSION_BOOST * e.material.emissiveStrength),
+        },
+        uRadius: { value: coreR },
+      },
     });
-    const rcMesh = new THREE.Mesh(new THREE.CircleGeometry(0.8 * r, 24), rcMat);
+    const rcMesh = new THREE.Mesh(new THREE.CircleGeometry(coreR, 32), rcMat);
     this.rcScene.add(rcMesh);
 
     this.fish.set(e.id, {
@@ -243,7 +267,7 @@ export class SpriteWorld {
       const glowMat = f.glowMats[0]!;
       (glowMat.uniforms['uStrength'] as THREE.IUniform).value =
         e.material.emissiveStrength * pulse;
-      f.rcMat.color
+      (f.rcMat.uniforms['uColor']!.value as THREE.Color)
         .copy(f.tint)
         .multiplyScalar(SpriteWorld.EMISSION_BOOST * e.material.emissiveStrength * pulse);
     }

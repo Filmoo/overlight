@@ -26,7 +26,7 @@ import { SpriteWorld } from './sprites';
  * References: Radiance Cascades (Sannikov 2023), jason.today/rc.
  */
 
-const GI_SCALE = 0.5; // GI buffer = half canvas resolution
+const GI_SCALE = 0.6; // GI buffer resolution relative to the canvas
 const BASE_INTERVAL_PX = 8;
 
 class Rc2dRenderer implements RendererModule {
@@ -120,9 +120,11 @@ class Rc2dRenderer implements RendererModule {
     this.giW = Math.max(4, Math.floor(w * GI_SCALE));
     this.giH = Math.max(4, Math.floor(h * GI_SCALE));
 
-    this.albedoRT = makeTarget(w, h);
-    this.emissionRT = makeTarget(w, h);
-    this.rcSceneRT = makeTarget(this.giW, this.giH);
+    // MSAA on every target that rasterizes geometry: silhouettes (rocks,
+    // fish, tank border) come out clean instead of 1px staircases.
+    this.albedoRT = makeTarget(w, h, { samples: 4 });
+    this.emissionRT = makeTarget(w, h, { samples: 4 });
+    this.rcSceneRT = makeTarget(this.giW, this.giH, { samples: 4 });
     // Float32 seeds: half precision wobbles at large coordinates and the
     // wobble reads as flicker in the light field.
     this.jfaA = makeTarget(this.giW, this.giH, { filter: THREE.NearestFilter, type: THREE.FloatType });

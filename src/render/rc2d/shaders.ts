@@ -174,6 +174,11 @@ void main() {
   lit = mix(lit, lit * lit * (3.0 - 2.0 * lit), 0.35);
   lit = pow(lit, vec3(1.0 / 2.2));
 
+  // Dither before 8-bit quantization: large smooth dark gradients would
+  // otherwise show visible banding (Mach bands).
+  float dn = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
+  lit += (dn - 0.5) / 255.0;
+
   float alpha = max(albedo.a, min(1.0, max(emission.r, max(emission.g, emission.b))));
   outColor = vec4(lit * alpha, alpha); // premultiplied for OBS compositing
 }
