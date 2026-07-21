@@ -1,0 +1,9 @@
+{
+  "name": "test-single",
+  "view": { "kind": "ortho-topdown" },
+  "bounds": { "min": [0, 0, 0], "max": [4, 3, 3] },
+  "entities": [
+    { "prefab": "sand-floor", "pos": [2, 1.5, 0] },
+    { "prefab": "orb-glow", "pos": [2, 1.5, 1.5], "tint": [1.0, 1.0, 1.0] }
+  ]
+}

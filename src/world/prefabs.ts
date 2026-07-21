@@ -21,6 +21,16 @@ export const PREFABS: Record<string, PrefabDef> = {
     },
     tags: ['wander', 'emitter'],
   },
+  'orb-glow': {
+    // Static emitter for diagnosing the light field: one orb, nothing moves.
+    shape: { kind: 'sphere', radius: 0.18 },
+    material: {
+      albedo: [0.05, 0.07, 0.08],
+      emissive: [1.0, 1.0, 1.0],
+      emissiveStrength: 1.0,
+    },
+    tags: ['emitter'],
+  },
   'rock-round': {
     shape: { kind: 'sphere', radius: 0.45 },
     material: {

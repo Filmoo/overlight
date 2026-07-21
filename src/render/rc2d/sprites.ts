@@ -59,12 +59,16 @@ void main() {
 
 const CORE_FS = /* glsl */ `
 uniform vec3 uColor;
+uniform float uRadius;
+varying vec2 vLocal;
 void main() {
-  // SOLID emitter, like every reference implementation. Rays always stop at
-  // the disc edge, so any radial falloff here means distant rays only ever
-  // sample the dim rim — which collapses the light field's 1/r falloff.
-  // Smooth pools must come from the solver, never from softening the source.
-  gl_FragColor = vec4(uColor, 1.0);
+  // Soft-edged AREA light: full-bright plateau out to 80% of the radius, a
+  // 2-texel antialiased rim beyond. The plateau (not a full radial falloff)
+  // keeps rays hitting bright interior — a point source is RC's worst case,
+  // an area source its best, so a larger soft disc reads far smoother.
+  float r = length(vLocal) / uRadius;
+  float a = 1.0 - smoothstep(0.8, 1.0, r);
+  gl_FragColor = vec4(uColor * a, a);
 }
 `;
 
@@ -215,9 +219,10 @@ export class SpriteWorld {
     const emissionMesh = new THREE.Mesh(new THREE.PlaneGeometry(glowR * 2, glowR * 2), glowMat);
     this.emission.add(emissionMesh);
 
-    // GI light source: a bright core with radial falloff (fish don't occlude
-    // — they float above the light plane).
-    const coreR = 0.8 * r;
+    // GI light source: a soft-edged area disc, larger than the fish body so
+    // it has real angular extent (fish don't occlude — they float above the
+    // light plane). Transparent so the soft rim alpha-blends onto the scene.
+    const coreR = 1.35 * r;
     const rcMat = new THREE.ShaderMaterial({
       vertexShader: SPRITE_VS,
       fragmentShader: CORE_FS,
@@ -227,9 +232,12 @@ export class SpriteWorld {
             .clone()
             .multiplyScalar(this.boost * e.material.emissiveStrength),
         },
+        uRadius: { value: coreR },
       },
+      transparent: true,
+      depthWrite: false,
     });
-    const rcMesh = new THREE.Mesh(new THREE.CircleGeometry(coreR, 32), rcMat);
+    const rcMesh = new THREE.Mesh(new THREE.CircleGeometry(coreR, 40), rcMat);
     this.rcScene.add(rcMesh);
 
     this.fish.set(e.id, {

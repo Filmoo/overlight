@@ -4,11 +4,13 @@ import { fitTopDown } from '../api/extract/planar';
 import type { Capability, ParamDef, RenderContext, RendererModule } from '../api/renderer';
 import { FSQuad, makeTarget, rawMaterial } from './pipeline';
 import {
+  BLUR_FS,
   CASCADE_FS,
   COMPOSITE_FS,
   JFA_DIST_FS,
   JFA_SEED_FS,
   JFA_STEP_FS,
+  RESOLVE_FS,
   TEMPORAL_FS,
 } from './shaders';
 import { SpriteWorld } from './sprites';
@@ -21,7 +23,9 @@ import { SpriteWorld } from './sprites';
  *      GI scene = occluders + light cores (half res)
  *   2. JFA: seeds → jump flood → distance field
  *   3. radiance cascades, top cascade down to 0
- *   4. composite: albedo × radiance + emission, tonemapped, premultiplied α
+ *   4. resolve tile-packed cascade 0 → per-pixel irradiance
+ *   5. separable blur of the irradiance (erases probe-grid residue)
+ *   6. composite: albedo × irradiance + emission, tonemapped, premultiplied α
  *
  * References: Radiance Cascades (Sannikov 2023), jason.today/rc.
  */
@@ -30,11 +34,11 @@ import { SpriteWorld } from './sprites';
 const AMBIENT_HUE = new THREE.Vector3(0.52, 0.7, 1.0);
 
 const PARAM_DEFS: readonly ParamDef[] = [
-  { key: 'giScale', label: 'GI resolution', min: 0.4, max: 1.0, step: 0.05, value: 1.0 },
-  { key: 'tileExp', label: 'c0 dirs (4^x)', min: 1, max: 2, step: 1, value: 1 },
-  { key: 'basePx', label: 'c0 interval px', min: 1, max: 8, step: 0.5, value: 2 },
+  { key: 'giScale', label: 'GI resolution', min: 0.4, max: 1.0, step: 0.05, value: 0.5 },
+  { key: 'tileExp', label: 'c0 dirs (4^x)', min: 1, max: 2, step: 1, value: 2 },
+  { key: 'basePx', label: 'c0 interval px', min: 1, max: 8, step: 0.5, value: 4 },
   { key: 'history', label: 'temporal history', min: 0, max: 0.95, step: 0.01, value: 0.3 },
-  { key: 'feather', label: 'cascade feather', min: 0, max: 1, step: 0.05, value: 0 },
+  { key: 'blur', label: 'GI blur (texels)', min: 0, max: 4, step: 0.25, value: 1.5 },
   { key: 'jitter', label: 'ray jitter', min: 0, max: 1, step: 0.05, value: 0 },
   { key: 'intensity', label: 'light intensity', min: 0.2, max: 3, step: 0.05, value: 1.3 },
   { key: 'ambient', label: 'ambient level', min: 0, max: 0.4, step: 0.005, value: 0.115 },
@@ -67,12 +71,16 @@ class Rc2dRenderer implements RendererModule {
   private cascadeB!: THREE.WebGLRenderTarget;
   private histA!: THREE.WebGLRenderTarget;
   private histB!: THREE.WebGLRenderTarget;
+  private irrA!: THREE.WebGLRenderTarget;
+  private irrB!: THREE.WebGLRenderTarget;
 
   private seedMat!: THREE.RawShaderMaterial;
   private stepMat!: THREE.RawShaderMaterial;
   private distMat!: THREE.RawShaderMaterial;
   private cascadeMat!: THREE.RawShaderMaterial;
   private temporalMat!: THREE.RawShaderMaterial;
+  private resolveMat!: THREE.RawShaderMaterial;
+  private blurMat!: THREE.RawShaderMaterial;
   private compositeMat!: THREE.RawShaderMaterial;
 
   private giW = 1;
@@ -118,21 +126,29 @@ class Rc2dRenderer implements RendererModule {
       uJitter: { value: 0 },
       uJitterAmt: { value: this.p['jitter'] },
       uTileExp: { value: this.p['tileExp'] },
-      uFeather: { value: this.p['feather'] },
     });
     this.temporalMat = rawMaterial(TEMPORAL_FS, {
       uCurr: { value: null },
       uPrev: { value: null },
       uBlend: { value: this.p['history'] },
     });
+    this.resolveMat = rawMaterial(RESOLVE_FS, {
+      uCascade0: { value: null },
+      uGiRes: { value: new THREE.Vector2() },
+      uTiles0: { value: 2 ** this.p['tileExp']! },
+    });
+    this.blurMat = rawMaterial(BLUR_FS, {
+      uTex: { value: null },
+      uTexel: { value: new THREE.Vector2() },
+      uDir: { value: new THREE.Vector2(1, 0) },
+      uRadius: { value: this.p['blur'] },
+    });
     this.compositeMat = rawMaterial(COMPOSITE_FS, {
       uAlbedo: { value: null },
       uEmission: { value: null },
-      uCascade0: { value: null },
-      uGiRes: { value: new THREE.Vector2() },
+      uIrr: { value: null },
       uAmbient: { value: AMBIENT_HUE.clone().multiplyScalar(this.p['ambient']!) },
       uIntensity: { value: this.p['intensity'] },
-      uTiles0: { value: 2 ** this.p['tileExp']! },
       uDebugView: { value: this.p['debugView'] },
     });
 
@@ -174,6 +190,8 @@ class Rc2dRenderer implements RendererModule {
     this.cascadeB = makeTarget(this.giW, this.giH);
     this.histA = makeTarget(this.giW, this.giH);
     this.histB = makeTarget(this.giW, this.giH);
+    this.irrA = makeTarget(this.giW, this.giH);
+    this.irrB = makeTarget(this.giW, this.giH);
   }
 
   private disposeTargets(): void {
@@ -188,6 +206,8 @@ class Rc2dRenderer implements RendererModule {
       this.cascadeB,
       this.histA,
       this.histB,
+      this.irrA,
+      this.irrB,
     ]) {
       rt?.dispose();
     }
@@ -205,13 +225,13 @@ class Rc2dRenderer implements RendererModule {
         break;
       case 'tileExp':
         this.cascadeMat.uniforms['uTileExp']!.value = value;
-        this.compositeMat.uniforms['uTiles0']!.value = 2 ** value;
+        this.resolveMat.uniforms['uTiles0']!.value = 2 ** value;
+        break;
+      case 'blur':
+        this.blurMat.uniforms['uRadius']!.value = value;
         break;
       case 'history':
         this.temporalMat.uniforms['uBlend']!.value = value;
-        break;
-      case 'feather':
-        this.cascadeMat.uniforms['uFeather']!.value = value;
         break;
       case 'jitter':
         this.cascadeMat.uniforms['uJitterAmt']!.value = value;
@@ -311,11 +331,27 @@ class Rc2dRenderer implements RendererModule {
     this.quad.render(gl, this.temporalMat, this.histB);
     [this.histA, this.histB] = [this.histB, this.histA];
 
-    // 5 — composite to canvas
+    // 5 — resolve tile-packed cascade 0 → per-pixel irradiance
+    this.resolveMat.uniforms['uCascade0']!.value = this.histA.texture;
+    this.resolveMat.uniforms['uGiRes']!.value = giRes;
+    this.quad.render(gl, this.resolveMat, this.irrA);
+
+    // 6 — separable blur (skipped when radius is 0)
+    if (this.p['blur']! > 0.001) {
+      const texel = new THREE.Vector2(1 / this.giW, 1 / this.giH);
+      this.blurMat.uniforms['uTex']!.value = this.irrA.texture;
+      this.blurMat.uniforms['uTexel']!.value = texel;
+      this.blurMat.uniforms['uDir']!.value = new THREE.Vector2(1, 0);
+      this.quad.render(gl, this.blurMat, this.irrB);
+      this.blurMat.uniforms['uTex']!.value = this.irrB.texture;
+      this.blurMat.uniforms['uDir']!.value = new THREE.Vector2(0, 1);
+      this.quad.render(gl, this.blurMat, this.irrA);
+    }
+
+    // 7 — composite to canvas
     this.compositeMat.uniforms['uAlbedo']!.value = this.albedoRT.texture;
     this.compositeMat.uniforms['uEmission']!.value = this.emissionRT.texture;
-    this.compositeMat.uniforms['uCascade0']!.value = this.histA.texture;
-    this.compositeMat.uniforms['uGiRes']!.value = giRes;
+    this.compositeMat.uniforms['uIrr']!.value = this.irrA.texture;
     this.quad.render(gl, this.compositeMat, null);
   }
 
@@ -323,7 +359,16 @@ class Rc2dRenderer implements RendererModule {
     this.disposeTargets();
     this.sprites.dispose();
     this.quad.dispose();
-    for (const m of [this.seedMat, this.stepMat, this.distMat, this.cascadeMat, this.compositeMat]) {
+    for (const m of [
+      this.seedMat,
+      this.stepMat,
+      this.distMat,
+      this.cascadeMat,
+      this.temporalMat,
+      this.resolveMat,
+      this.blurMat,
+      this.compositeMat,
+    ]) {
       m.dispose();
     }
     this.three.dispose();

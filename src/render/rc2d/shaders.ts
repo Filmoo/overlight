@@ -66,7 +66,6 @@ uniform float uBasePx;      // cascade 0 interval length (px)
 uniform float uJitter;      // fresh random per frame, 0..1
 uniform float uJitterAmt;   // 0 = canonical deterministic rays
 uniform float uTileExp;     // tiles at c0 = 2^uTileExp (1 → 4 dirs, 2 → 16 dirs)
-uniform float uFeather;     // extra cross-fade at cascade boundaries, 0..1
 in vec2 vUv;
 out vec4 outColor;
 
@@ -95,65 +94,59 @@ void main() {
   float ang = TAU * (dirIndex + 0.5 + (rnd - 0.5) * uJitterAmt) / dirCount;
   vec2 dir = vec2(cos(ang), sin(ang));
 
-  // Canonical intervals (jason.today/rc): start_n = 4^(n-1)·L, length_n =
-  // 4^n·L. Consecutive intervals overlap by 25% BY CONSTRUCTION — that
-  // overlap, not a hand-off hack, is what hides cascade seams.
+  // Contiguous intervals matching the reference implementation
+  // (gist futureengine2): boundaries at L·4^(n-1) — cascade n covers
+  // [L·4^(n-1), L·4^n), with c0 = [0, L].
   float t0 = n == 0.0 ? 0.0 : uBasePx * pow(4.0, n - 1.0);
-  float t1 = t0 + uBasePx * pow(4.0, n);
+  float t1 = uBasePx * pow(4.0, n);
 
   vec3 hitCol = vec3(0.0);
   bool hit = false;
-  float tHit = t1;
   float t = t0;
   for (int i = 0; i < 40; i++) {
     vec2 p = probePx + dir * t;
     if (p.x < 0.0 || p.y < 0.0 || p.x >= uRes.x || p.y >= uRes.y) break;
     float d = texture(uDist, p / uRes).r;
     if (d < 0.5) {
-      // Canonical: sample the scene where the ray stopped. The GI scene has
-      // MSAA + soft-edged cores, so edge texels blend naturally.
       hitCol = texture(uScene, p / uRes).rgb;
       hit = true;
-      tHit = t;
       break;
     }
     t += max(d, 0.5);
     if (t > t1) break;
   }
 
-  // Optional extra cross-fade band at the far end of the interval (the
-  // canonical 25% interval overlap already handles most seam hiding).
-  float band = uFeather * 0.35 * (t1 - t0);
-  float w = hit ? smoothstep(t1 - band, t1, tHit) : 1.0;
-
   vec3 merged = vec3(0.0);
-  if (uHasUpper && w > 0.001) {
-    // Merge the 4 child directions from the upper cascade with MANUAL
-    // bilinear filtering (texelFetch): hardware filtering near tile borders
-    // bleeds into neighboring tiles — which hold different directions — and
-    // clamping shifts edge probes inward, biasing the field near edges.
+  if (uHasUpper && !hit) {
+    // THE BILINEAR FIX (the actual cure for ringing). A child probe sits at
+    // exactly the 0.25 or 0.75 point between two parent probes — never the
+    // continuous fractional position. Using parity-based 0.75/0.25 weights
+    // (per the reference) instead of a naive lerp is what removes the rings.
     float tilesU = tiles * 2.0;
-    vec2 tileSizeU = uRes / tilesU;               // exact integers by construction
-    vec2 gp = probeUV * tileSizeU - 0.5;          // position in upper-probe units
-    vec2 base = floor(gp);
-    vec2 fw = gp - base;
-    vec2 mx = tileSizeU - 1.0;
-    vec2 p00 = clamp(base, vec2(0.0), mx);
-    vec2 p11 = clamp(base + 1.0, vec2(0.0), mx);
+    vec2 tileSizeU = uRes / tilesU;               // upper probes per axis, exact int
+    vec2 li = floor(px - tile * tileSize);        // this probe's integer index
+    vec2 i2 = floor((li + 1.0) * 0.5);            // parent base index
+    vec2 tw = vec2(0.75) - 0.5 * mod(li, 2.0);    // 0.75 if even, 0.25 if odd
+    vec2 mxu = tileSizeU - 1.0;
+    vec2 pa = clamp(i2 - 1.0, vec2(0.0), mxu);
+    vec2 pb = clamp(i2, vec2(0.0), mxu);
     vec3 sum = vec3(0.0);
     for (int k = 0; k < 4; k++) {
       float dU = dirIndex * 4.0 + float(k);
       vec2 tO = vec2(mod(dU, tilesU), floor(dU / tilesU)) * tileSizeU;
-      vec3 s00 = texelFetch(uUpper, ivec2(tO + vec2(p00.x, p00.y)), 0).rgb;
-      vec3 s10 = texelFetch(uUpper, ivec2(tO + vec2(p11.x, p00.y)), 0).rgb;
-      vec3 s01 = texelFetch(uUpper, ivec2(tO + vec2(p00.x, p11.y)), 0).rgb;
-      vec3 s11 = texelFetch(uUpper, ivec2(tO + vec2(p11.x, p11.y)), 0).rgb;
-      sum += mix(mix(s00, s10, fw.x), mix(s01, s11, fw.x), fw.y);
+      vec3 s00 = texelFetch(uUpper, ivec2(tO + vec2(pa.x, pa.y)), 0).rgb;
+      vec3 s10 = texelFetch(uUpper, ivec2(tO + vec2(pb.x, pa.y)), 0).rgb;
+      vec3 s01 = texelFetch(uUpper, ivec2(tO + vec2(pa.x, pb.y)), 0).rgb;
+      vec3 s11 = texelFetch(uUpper, ivec2(tO + vec2(pb.x, pb.y)), 0).rgb;
+      sum += mix(mix(s00, s10, tw.x), mix(s01, s11, tw.x), tw.y);
     }
     merged = sum * 0.25;
   }
 
-  vec3 radiance = hit ? mix(hitCol, merged, uHasUpper ? w : 0.0) : merged;
+  // Binary merge, exactly like the reference: hit -> its colour, miss -> the
+  // upper cascade's estimate. No feather, no cross-fade — those were hacks
+  // papering over the wrong bilinear weights.
+  vec3 radiance = hit ? hitCol : merged;
   outColor = vec4(radiance, 1.0);
 }
 `;
@@ -172,25 +165,17 @@ void main() {
 }
 `;
 
-export const COMPOSITE_FS = /* glsl */ `
+// Resolve the tile-packed cascade 0 into a single per-pixel irradiance:
+// average all directions (manual bilinear per tile, since hardware filtering
+// would bleed across tiles that hold different directions).
+export const RESOLVE_FS = /* glsl */ `
 precision highp float;
-uniform sampler2D uAlbedo;    // full-res albedo (a: coverage)
-uniform sampler2D uEmission;  // full-res emission glows
-uniform sampler2D uCascade0;  // GI result, uTiles0 x uTiles0 direction tiles
+uniform sampler2D uCascade0;
 uniform vec2 uGiRes;
-uniform vec3 uAmbient;
-uniform float uIntensity;
-uniform int uTiles0;          // direction tiles per axis at cascade 0
-uniform float uDebugView;     // 0 = final, 1 = raw GI field, 2 = GI x albedo (no glow)
+uniform int uTiles0;
 in vec2 vUv;
 out vec4 outColor;
-
 void main() {
-  vec4 albedo = texture(uAlbedo, vUv);
-  vec4 emission = texture(uEmission, vUv);
-
-  // Average the cascade-0 directions -> incoming radiance at this pixel.
-  // Manual bilinear per tile (same reasoning as the cascade merge).
   vec2 tileSize0 = uGiRes / float(uTiles0);
   vec2 gp = vUv * tileSize0 - 0.5;
   vec2 base = floor(gp);
@@ -209,7 +194,51 @@ void main() {
     vec3 s11 = texelFetch(uCascade0, ivec2(tO + vec2(p11.x, p11.y)), 0).rgb;
     irr += mix(mix(s00, s10, fw.x), mix(s01, s11, fw.x), fw.y);
   }
-  irr *= 1.0 / float(dirs);
+  outColor = vec4(irr / float(dirs), 1.0);
+}
+`;
+
+// Separable Gaussian on the resolved irradiance. The light field is
+// low-frequency by nature, so a mild blur erases the last grid-aligned
+// residue from the discrete probe interpolation without losing real detail.
+export const BLUR_FS = /* glsl */ `
+precision highp float;
+uniform sampler2D uTex;
+uniform vec2 uTexel;   // 1 / resolution
+uniform vec2 uDir;     // (1,0) horizontal, (0,1) vertical
+uniform float uRadius; // texels; 0 = passthrough
+in vec2 vUv;
+out vec4 outColor;
+void main() {
+  float w0 = 0.227027, w1 = 0.194594, w2 = 0.121621, w3 = 0.054054, w4 = 0.016216;
+  vec3 sum = texture(uTex, vUv).rgb * w0;
+  vec2 o1 = uDir * uTexel * (1.0 * uRadius);
+  vec2 o2 = uDir * uTexel * (2.0 * uRadius);
+  vec2 o3 = uDir * uTexel * (3.0 * uRadius);
+  vec2 o4 = uDir * uTexel * (4.0 * uRadius);
+  sum += (texture(uTex, vUv + o1).rgb + texture(uTex, vUv - o1).rgb) * w1;
+  sum += (texture(uTex, vUv + o2).rgb + texture(uTex, vUv - o2).rgb) * w2;
+  sum += (texture(uTex, vUv + o3).rgb + texture(uTex, vUv - o3).rgb) * w3;
+  sum += (texture(uTex, vUv + o4).rgb + texture(uTex, vUv - o4).rgb) * w4;
+  outColor = vec4(sum, 1.0);
+}
+`;
+
+export const COMPOSITE_FS = /* glsl */ `
+precision highp float;
+uniform sampler2D uAlbedo;    // full-res albedo (a: coverage)
+uniform sampler2D uEmission;  // full-res emission glows
+uniform sampler2D uIrr;       // resolved + blurred irradiance
+uniform vec3 uAmbient;
+uniform float uIntensity;
+uniform float uDebugView;     // 0 = final, 1 = raw GI field, 2 = GI x albedo (no glow)
+in vec2 vUv;
+out vec4 outColor;
+
+void main() {
+  vec4 albedo = texture(uAlbedo, vUv);
+  vec4 emission = texture(uEmission, vUv);
+  vec3 irr = texture(uIrr, vUv).rgb;
 
   if (uDebugView > 0.5 && uDebugView < 1.5) {
     // Raw GI irradiance, gamma only — judge the solver with no makeup.

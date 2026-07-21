@@ -4,6 +4,39 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/).
 
+## [0.2.8] - 2026-07-21
+
+Studied a complete reference implementation and fixed the ringing at its
+root instead of hacking around it.
+
+### Fixed
+
+- **The bilinear fix** — the actual cure for radiance-cascade ringing. A
+  child probe sits at exactly the 0.25 or 0.75 point between two parent
+  probes; the merge now uses those parity-based weights instead of the naive
+  continuous lerp, which is the textbook cause of the rings. This removed
+  the gross ringing that no amount of tuning could.
+- Intervals matched to the reference (`[L·4^(n-1), L·4^n)`), and every
+  compensating hack removed: the cascade "feather" cross-fade and the
+  interval pull-back are gone — both were papering over the wrong weights.
+- Soft-edged **area-light** emitters (was a solid disc): a point source is
+  RC's worst case, an area source its best, so a larger soft disc reads far
+  smoother. Default cascade-0 directions 4 → 16.
+
+### Added
+
+- Resolve → separable-blur → composite tail: cascade 0 is resolved to a
+  per-pixel irradiance, optionally blurred, then shaded. The blur plus a
+  reduced-resolution GI buffer (upsampled with hardware bilinear, like the
+  reference) erase the last probe-grid residue. New `blur` param.
+- `test-single` map (one static orb) + `orb-glow` prefab — the light-field
+  diagnostic scene; maps being pure data made this a 10-line addition.
+
+### Changed
+
+- Defaults tuned on the single-orb close-up: GI resolution 0.5, base
+  interval 4px, 16 directions, blur 1.5. Removed the `feather` param.
+
 ## [0.2.7] - 2026-07-21
 
 ### Fixed
